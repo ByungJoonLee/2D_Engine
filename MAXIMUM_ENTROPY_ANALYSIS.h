@@ -53,7 +53,7 @@ public: // Initialization Function
 			istringstream iss(line);
 
 			int i;
-			T a;
+			T a(0);
 			
 			x[i] = a;
 			
