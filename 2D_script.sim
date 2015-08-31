@@ -242,8 +242,9 @@ MONGE_AMPERE_EQUATION_TEST
 {
 	tolerance = 0.000001
 	max_iteration_for_sub_linear_solver = 10000000
-	max_iteration_for_Newton_Method = 1
+	max_iteration_for_Newton_Method = 2
 	
+	n_y = 32
 	is_regularized = true
 	
 	// Damping parameter

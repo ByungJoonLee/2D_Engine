@@ -32,6 +32,13 @@ public: // Main variables
 	FIELD_STRUCTURE_2D<T>				RHS;
 	FIELD_STRUCTURE_2D<T>				RHS_h;
 
+	// For target normal vector
+	int									n_y;
+
+	// For boundary condition setup
+	ARRAY<T>							H_n;
+	int									max_left, max_right, max_lower, max_upper;
+
 public: // Convenient variables and references
 	GRID_STRUCTURE_2D					base_grid;
 
@@ -64,7 +71,7 @@ public: // Test
 
 public: // Constructor and Destructor
 	MONGE_AMPERE_SOLVER(void)
-		: multithreading(0), sub_linear_solver(0), is_regularized(false)
+		: multithreading(0), sub_linear_solver(0), is_regularized(false), n_y(32)
 	{}
 
 	~MONGE_AMPERE_SOLVER(void)
@@ -107,7 +114,11 @@ public: // Initialization Function
 		max_iteration_for_sub_linear_solver = monge_ampere_eqn_block.GetInteger("max_iteration_for_sub_linear_solver", (int)100);
 		max_iteration_for_Newton_Method = monge_ampere_eqn_block.GetInteger("max_iteration_for_Newton_Method", (int)100);
 		
+		n_y = monge_ampere_eqn_block.GetInteger("n_y", (int)32);
 		is_regularized = monge_ampere_eqn_block.GetBoolean("is_regularized", (bool)false);
+
+		cout << "-------------------Monge-Ampere Solver Started-------------------" << endl;
+		cout << "n_y = " << n_y << endl;
 
 		// For sub solver
 		const char* sub_linear_solver_type_input = monge_ampere_eqn_block.GetString("sub_linear_solver_type", "Null");
@@ -265,7 +276,7 @@ public: // Member Function
 		AssignStencil(density_x, density_y, density_y, thread_id);
 		
 		const int num_all_full_cells = AssignSequentialindicesToFullCells(bc, thread_id);
-		const int nnz = 2189;//CountNonZeroElements(bc, thread_id, MA_array);//1289;
+		const int nnz = CountNonZeroElements(bc, thread_id, MA_array);//1289;
 		
 		HEAD_THREAD_WORK(J.Initialize(num_all_full_cells, nnz, multithreading));
 		HEAD_THREAD_WORK(b_vector.Initialize(num_all_full_cells));
@@ -306,29 +317,65 @@ public: // Member Function
 
 		T H_star_n(0);
 
-		// Left Boundary
-		for (int j = j_start; j <= j_end; j++)
+		ARRAY<VT> target_normal;
+		target_normal.Initialize(n_y);
+
+		for (int i = 0; i < target_normal.length; i++)
 		{
-			T dot_1, dot_2, dot_3;
-
-			T x_coor = x_min + i_start*dx, y_coor = y_min + j*dy;
-
-			VT n1(-1, 0), n2(-(T)1/sqrt(2), (T)1/sqrt(2)), n3(-(T)1/sqrt(2), -(T)1/sqrt(2)), y_0(x_coor, y_coor);
-
-			dot_1 = DotProduct(y_0, n1);
-			dot_2 = DotProduct(y_0, n2);
-			dot_3 = DotProduct(y_0, n3);
-			
-			T a, b, c;
-			
-			INCREASING_SORT3(dot_1, dot_2, dot_3, a, b, c);
-
-			if (c >= H_star_n)
-			{
-				H_star_n = c;
-			}
+			target_normal[i].x = cos(2 * PI*i / n_y);
+			target_normal[i].y = sin(2 * PI*i / n_y);
 		}
 
+		// Define H*(n)
+		H_n.Initialize(n_y);
+
+		for (int k = 0; k < target_normal.length; k++)
+		{
+			VT& tn(target_normal[k]);
+
+			H_n[k] = 0;
+
+			// Left Boundary
+			for (int j = j_start; j <= j_end; j++)
+			{
+				T x_coor = x_min + i_start*dx, y_coor = y_min + j*dy;
+
+				VT y_0(x_coor, y_coor);
+
+				H_n[k] = MAX(H_n[k], DotProduct(y_0, tn));
+			}
+			
+			// Right Boundary
+			for (int j = j_start; j <= j_end; j++)
+			{
+				T x_coor = x_min + i_end*dx, y_coor = y_min + j*dy;
+
+				VT y_0(x_coor, y_coor);
+
+				H_n[k] = MAX(H_n[k], DotProduct(y_0, tn));
+			}
+
+			// Lower Boundary
+			for (int i = i_start; i <= i_end; i++)
+			{
+				T x_coor = x_min + i*dx, y_coor = y_min + j_start*dy;
+
+				VT y_0(x_coor, y_coor);
+
+				H_n[k] = MAX(H_n[k], DotProduct(y_0, tn));
+			}
+			
+			// Upper Boundary
+			for (int i = i_start; i <= i_end; i++)
+			{
+				T x_coor = x_min + i*dx, y_coor = y_min + j_end*dy;
+
+				VT y_0(x_coor, y_coor);
+
+				H_n[k] = MAX(H_n[k], DotProduct(y_0, tn));
+			}
+		}
+		
 		// Left Boundary
 		for (int j = j_start; j <= j_end; j++)
 		{
@@ -570,43 +617,37 @@ public: // Member Function
 					// Define b_vector
 					T dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
 
-					T H_adv_1 = -dxp, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = -(T)1/sqrt(2)*dxp - (T)1/sqrt(2)*dyp;
-					
-					T H_1, H_2, H_3;
-					
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-					
-					if (H_3 == H_adv_1)
+					T b_vector_value = 0;
+					for (int k = 0; k < target_normal.length; k++)
 					{
-						T b_vector_value = H_adv_1 - H_star_n;
+						VT n_x(-1, 0);
+						VT& tn(target_normal[k]);
 
-						b_vector[bc(i, j)] = b_vector_value;
+						T dot = DotProduct(n_x, tn);
 
-						// Assign Jacobian
-						T u_r, u_c;
-
-						u_r = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i + 1, j) > -1)
+						if (dot <= 0)
 						{
-							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+							continue;
 						}
 
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						T compared_one = tn.x*dxp + MAX(tn.y, 0)*dym + MIN(tn.y, 0)*dyp;
+
+						if (b_vector_value <= compared_one)
+						{
+							b_vector_value = compared_one;
+							max_left = k;
+						}
 					}
-					else if (H_3 == H_adv_2)
+
+					b_vector[bc(i, j)] = b_vector_value;
+
+					if (target_normal[max_left].y > 0)
 					{
-						T b_vector_value = H_adv_2 - H_star_n;
+						T u_r, u_d, u_c;
 
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c, u_d;
-
-						u_r = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_d = -one_over_dx*(T)1/sqrt(2);
+						u_r = target_normal[max_left].x*one_over_dx;
+						u_d = -target_normal[max_left].y*one_over_dy;
+						u_c = -target_normal[max_left].x*one_over_dx + target_normal[max_left].y*one_over_dy;
 
 						if (bc(i + 1, j) > -1)
 						{
@@ -616,21 +657,16 @@ public: // Member Function
 						{
 							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
 						}
-
+						
 						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 					}
-					else
+					else if (target_normal[max_left].y < 0)
 					{
-						T b_vector_value = H_adv_3 - H_star_n;
+						T u_r, u_u, u_c;
 
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c, u_u;
-
-						u_r = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_u = -one_over_dx*(T)1/sqrt(2);
+						u_r = target_normal[max_left].x*one_over_dx;
+						u_u = target_normal[max_left].y*one_over_dy;
+						u_c = -target_normal[max_left].x*one_over_dx - target_normal[max_left].y*one_over_dy;
 
 						if (bc(i + 1, j) > -1)
 						{
@@ -642,7 +678,95 @@ public: // Member Function
 						}
 
 						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}	
+					}
+					else
+					{
+						T u_r, u_c;
+
+						u_r = target_normal[max_left].x*one_over_dx;
+						u_c = -target_normal[max_left].x*one_over_dx;
+
+						if (bc(i + 1, j) > -1)
+						{
+							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+						}
+						
+						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					}
+
+					//T H_adv_1 = -dxp, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = -(T)1/sqrt(2)*dxp - (T)1/sqrt(2)*dyp;
+					//
+					//T H_1, H_2, H_3;
+					//
+					//INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
+					//
+					//if (H_3 == H_adv_1)
+					//{
+					//	T b_vector_value = H_adv_1 - H_star_n;
+
+					//	b_vector[bc(i, j)] = b_vector_value;
+
+					//	// Assign Jacobian
+					//	T u_r, u_c;
+
+					//	u_r = -one_over_dx;
+					//	u_c = one_over_dx;
+
+					//	if (bc(i + 1, j) > -1)
+					//	{
+					//		J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+					//	}
+
+					//	J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					//}
+					//else if (H_3 == H_adv_2)
+					//{
+					//	T b_vector_value = H_adv_2 - H_star_n;
+
+					//	b_vector[bc(i, j)] = b_vector_value;
+
+					//	// Assign Jacobian
+					//	T u_r, u_c, u_d;
+
+					//	u_r = -one_over_dx*(T)1/sqrt(2);
+					//	u_c = one_over_dx*(T)2/sqrt(2);
+					//	u_d = -one_over_dx*(T)1/sqrt(2);
+
+					//	if (bc(i + 1, j) > -1)
+					//	{
+					//		J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+					//	}
+					//	if (bc(i, j - 1) > -1)
+					//	{
+					//		J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+					//	}
+
+					//	J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					//}
+					//else
+					//{
+					//	T b_vector_value = H_adv_3 - H_star_n;
+
+					//	b_vector[bc(i, j)] = b_vector_value;
+
+					//	// Assign Jacobian
+					//	T u_r, u_c, u_u;
+
+					//	u_r = -one_over_dx*(T)1/sqrt(2);
+					//	u_c = one_over_dx*(T)2/sqrt(2);
+					//	u_u = -one_over_dx*(T)1/sqrt(2);
+
+					//	if (bc(i + 1, j) > -1)
+					//	{
+					//		J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+					//	}
+					//	if (bc(i, j + 1) > -1)
+					//	{
+					//		J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
+					//	}
+
+					//	J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					//}	
 				}
 				
 			}
