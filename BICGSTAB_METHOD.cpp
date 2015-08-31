@@ -103,7 +103,7 @@ void BICGSTAB_METHOD::BICGSTABMethod(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, co
 
 		rho_2 = rho_1;
 
-		if (res.Norm2()/norm_of_b < tolerance)
+		if (res.Norm2()/*/norm_of_b*/ < tolerance)
 		{
 			cout << "Converge!!" << endl;
 			cout << "Iteration Number : " << num_iteration << endl;
@@ -115,7 +115,7 @@ void BICGSTAB_METHOD::BICGSTABMethod(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, co
 			tolerance = res.Norm2()/norm_of_b;
 			break;
 		}	
-
+		
 		num_iteration++;
 	}
 
@@ -281,7 +281,7 @@ void BICGSTAB_METHOD::BICGSTABMethod(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, co
 			cout << "Residual: " << residual << endl;
 			cout << "--------------------------------------------" << endl;
 		}
-
+		
 		if (omega == 0)
 		{
 			tolerance = res.Norm2()/norm_of_b;

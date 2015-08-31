@@ -57,12 +57,14 @@ public: // For Newton Method
 
 	T									tolerance;
 
+	bool								is_regularized;
+
 public: // Test
 	int									test_number;
 
 public: // Constructor and Destructor
 	MONGE_AMPERE_SOLVER(void)
-		: multithreading(0), sub_linear_solver(0)
+		: multithreading(0), sub_linear_solver(0), is_regularized(false)
 	{}
 
 	~MONGE_AMPERE_SOLVER(void)
@@ -99,12 +101,14 @@ public: // Initialization Function
 		MA_array[1].Initialize(base_grid, 1, multithreading);
 
 		// For practical reason
-		delta = base_grid.dx2;
+		delta = (T)0.5*base_grid.one_over_dx2*1e-8;
 
 		tolerance = monge_ampere_eqn_block.GetFloat("tolerance", (T)0.001);
 		max_iteration_for_sub_linear_solver = monge_ampere_eqn_block.GetInteger("max_iteration_for_sub_linear_solver", (int)100);
 		max_iteration_for_Newton_Method = monge_ampere_eqn_block.GetInteger("max_iteration_for_Newton_Method", (int)100);
 		
+		is_regularized = monge_ampere_eqn_block.GetBoolean("is_regularized", (bool)false);
+
 		// For sub solver
 		const char* sub_linear_solver_type_input = monge_ampere_eqn_block.GetString("sub_linear_solver_type", "Null");
 
@@ -173,7 +177,16 @@ public: // Initialization Function
 		cout << "-------------------For Newton's Method-------------------" << endl;
 		cout << "tolerance: " << tolerance << endl;
 		cout << "max_iteration: " << max_iteration_for_Newton_Method << endl;
-				
+		
+		if (is_regularized == true)
+		{
+			cout << "is_regularized: " << "true" << endl;
+		}
+		else
+		{
+			cout << "is_regularized: " << "false" << endl;
+		}
+
 		switch (poisson_solver_type)
 		{
 		case NO_SOLVER:
@@ -235,7 +248,14 @@ public: // Member Function
 			(MA_array.values[0])(i, j) = max(dxx, delta)*max(dyy, delta) - min(dxx, delta) - min(dyy, delta) - rho_x(i, j)/rho_y_1(i, j);
 			(MA_array.values[1])(i, j) = max(dvv, delta)*max(dvpvp, delta) - min(dvv, delta) - min(dvpvp, delta) - rho_x(i, j)/rho_y_2(i, j);
 			
-			MA(i, j) = min((MA_array.values[0])(i, j), (MA_array.values[1])(i, j));
+			if (is_regularized)
+			{
+				MA(i, j) = (T)0.5*((MA_array.values[0])(i, j) + (MA_array.values[1])(i, j) + sqrt(POW2((MA_array.values[0])(i, j) - (MA_array.values[1])(i, j)) + POW2(delta)));
+			}
+			else
+			{
+				MA(i, j) = min((MA_array.values[0])(i, j), (MA_array.values[1])(i, j));
+			}
 		}
 		END_GRID_ITERATION_2D;
 	}
@@ -245,7 +265,7 @@ public: // Member Function
 		AssignStencil(density_x, density_y, density_y, thread_id);
 		
 		const int num_all_full_cells = AssignSequentialindicesToFullCells(bc, thread_id);
-		const int nnz = CountNonZeroElements(bc, thread_id);
+		const int nnz = 2189;//CountNonZeroElements(bc, thread_id, MA_array);//1289;
 		
 		HEAD_THREAD_WORK(J.Initialize(num_all_full_cells, nnz, multithreading));
 		HEAD_THREAD_WORK(b_vector.Initialize(num_all_full_cells));
@@ -272,14 +292,111 @@ public: // Member Function
 		T one_over_dx2 = u.grid.one_over_dx2, one_over_dy2 = u.grid.one_over_dy2;
 		T one_over_2dx = u.grid.one_over_2dx, one_over_2dy = u.grid.one_over_2dy;
 		
+		T x_min = u.grid.x_min, x_max = u.grid.x_max, dx = u.grid.dx;
+		T y_min = u.grid.y_min, y_max = u.grid.y_max, dy = u.grid.dy;
+
 		int i_start = u.grid.i_start, i_end = u.grid.i_end;
 		int j_start = u.grid.j_start, j_end = u.grid.j_end;
 		
 		// For fixed point
 		int mid_i(0), mid_j(0);
-			
+		
 		mid_i = (T)0.5*(i_start + i_end);
 		mid_j = (T)0.5*(j_start + j_end);
+
+		T H_star_n(0);
+
+		// Left Boundary
+		for (int j = j_start; j <= j_end; j++)
+		{
+			T dot_1, dot_2, dot_3;
+
+			T x_coor = x_min + i_start*dx, y_coor = y_min + j*dy;
+
+			VT n1(-1, 0), n2(-(T)1/sqrt(2), (T)1/sqrt(2)), n3(-(T)1/sqrt(2), -(T)1/sqrt(2)), y_0(x_coor, y_coor);
+
+			dot_1 = DotProduct(y_0, n1);
+			dot_2 = DotProduct(y_0, n2);
+			dot_3 = DotProduct(y_0, n3);
+			
+			T a, b, c;
+			
+			INCREASING_SORT3(dot_1, dot_2, dot_3, a, b, c);
+
+			if (c >= H_star_n)
+			{
+				H_star_n = c;
+			}
+		}
+
+		// Left Boundary
+		for (int j = j_start; j <= j_end; j++)
+		{
+			T dot_1, dot_2, dot_3;
+
+			T x_coor = x_min + i_end*dx, y_coor = y_min + j*dy;
+
+			VT n1(1, 0), n2((T)1/sqrt(2), (T)1/sqrt(2)), n3((T)1/sqrt(2), -(T)1/sqrt(2)), y_0(x_coor, y_coor);
+
+			dot_1 = DotProduct(y_0, n1);
+			dot_2 = DotProduct(y_0, n2);
+			dot_3 = DotProduct(y_0, n3);
+			
+			T a, b, c;
+			
+			INCREASING_SORT3(dot_1, dot_2, dot_3, a, b, c);
+
+			if (c >= H_star_n)
+			{
+				H_star_n = c;
+			}
+		}
+
+		// Lower Boundary
+		for (int i = i_start; i <= i_end; i++)
+		{
+			T dot_1, dot_2, dot_3;
+
+			T x_coor = x_min + i*dx, y_coor = y_min + j_start*dy;
+
+			VT n1(0, -1), n2((T)1/sqrt(2), -(T)1/sqrt(2)), n3(-(T)1/sqrt(2), -(T)1/sqrt(2)), y_0(x_coor, y_coor);
+
+			dot_1 = DotProduct(y_0, n1);
+			dot_2 = DotProduct(y_0, n2);
+			dot_3 = DotProduct(y_0, n3);
+			
+			T a, b, c;
+			
+			INCREASING_SORT3(dot_1, dot_2, dot_3, a, b, c);
+
+			if (c >= H_star_n)
+			{
+				H_star_n = c;
+			}
+		}
+
+		// Upper Boundary
+		for (int i = i_start; i <= i_end; i++)
+		{
+			T dot_1, dot_2, dot_3;
+
+			T x_coor = x_min + i*dx, y_coor = y_min + j_end*dy;
+
+			VT n1(0, 1), n2((T)1/sqrt(2), (T)1/sqrt(2)), n3(-(T)1/sqrt(2), (T)1/sqrt(2)), y_0(x_coor, y_coor);
+
+			dot_1 = DotProduct(y_0, n1);
+			dot_2 = DotProduct(y_0, n2);
+			dot_3 = DotProduct(y_0, n3);
+			
+			T a, b, c;
+			
+			INCREASING_SORT3(dot_1, dot_2, dot_3, a, b, c);
+
+			if (c >= H_star_n)
+			{
+				H_star_n = c;
+			}
+		}
 
 		BEGIN_GRID_ITERATION_2D(u.partial_grids[thread_id])
 		{
@@ -294,17 +411,13 @@ public: // Member Function
 			{
 				continue;
 			}
-
+						
 			// Need to add the derivative of source term
 			if (i == i_start)
 			{
 				if (j == j_start)
 				{
 					// Define b_vector
-					T H_star_n;
-
-					H_star_n = MAX(-(T)1/sqrt(2)*u.grid.x_min - (T)1/sqrt(2)*u.grid.y_min, MAX(-u.grid.x_min, -u.grid.y_min));
-					
 					T dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
 
 					T H_adv_1 = -dxp, H_adv_2 = -(T)1/sqrt(2)*dxp - (T)1/sqrt(2)*dyp, H_adv_3 = -dyp;
@@ -377,24 +490,84 @@ public: // Member Function
 						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 					}	
 				}
-				if (j != j_start && j != j_end)
+				else if (j == j_end)
 				{
 					// Define b_vector
-					T H_star_n;
+					T dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1));
 
-					H_star_n = -u.grid.x_min;
-					
-					for (int k = j_start + 1; k < j_end; k++)
+					T H_adv_1 = -dxp, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = dym;
+
+					// Start with comparison
+					T H_1, H_2, H_3;
+
+					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
+
+					if (H_3 == H_adv_1)
 					{
-						T y_coor = u.grid.y_min + k*u.grid.dy;
-						T comp = -(T)1 / sqrt(2)*y_coor - (T)1 / sqrt(2)*u.grid.x_min;
+						T b_vector_value = H_adv_1 - H_star_n;
 
-						if (H_star_n < comp)
+						b_vector[bc(i, j)] = b_vector_value;
+
+						// Assign Jacobian
+						T u_r, u_c;
+
+						u_r = -one_over_dx;
+						u_c = one_over_dx;
+
+						if (bc(i + 1, j) > -1)
 						{
-							H_star_n = comp;
+							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
 						}
-					}
 
+						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					}
+					else if (H_3 == H_adv_2)
+					{
+						T b_vector_value = H_adv_2 - H_star_n;
+
+						b_vector[bc(i, j)] = b_vector_value;
+
+						// Assign Jacobian
+						T u_r, u_c, u_d;
+
+						u_r = -one_over_dx*(T)1/sqrt(2);
+						u_c = one_over_dx*(T)2/sqrt(2);
+						u_d = -one_over_dx*(T)1/sqrt(2);
+
+						if (bc(i + 1, j) > -1)
+						{
+							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+						}
+						if (bc(i, j - 1) > -1)
+						{
+							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+						}
+
+						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					}
+					else
+					{
+						T b_vector_value = H_adv_3 - H_star_n;
+
+						b_vector[bc(i, j)] = b_vector_value;
+
+						// Assign Jacobian
+						T u_c, u_d;
+
+						u_c = one_over_dx;
+						u_d = -one_over_dx;
+
+						if (bc(i, j - 1) > -1)
+						{
+							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+						}
+
+						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					}
+				}
+				else
+				{
+					// Define b_vector
 					T dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
 
 					T H_adv_1 = -dxp, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = -(T)1/sqrt(2)*dxp - (T)1/sqrt(2)*dyp;
@@ -471,95 +644,13 @@ public: // Member Function
 						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 					}	
 				}
-				if (j == j_end)
-				{
-					// Define b_vector
-					T H_star_n;
-
-					H_star_n = MAX(-(T)1/sqrt(2)*u.grid.x_min + (T)1/sqrt(2)*u.grid.y_max, MAX(-u.grid.x_min, u.grid.y_max));
-
-					T dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1));
-
-					T H_adv_1 = -dxp, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = dym;
-
-					// Start with comparison
-					T H_1, H_2, H_3;
-
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-
-					if (H_3 == H_adv_1)
-					{
-						T b_vector_value = H_adv_1 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c;
-
-						u_r = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i + 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}
-					else if (H_3 == H_adv_2)
-					{
-						T b_vector_value = H_adv_2 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c, u_d;
-
-						u_r = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_d = -one_over_dx*(T)1/sqrt(2);
-
-						if (bc(i + 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-						}
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}
-					else
-					{
-						T b_vector_value = H_adv_3 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_c, u_d;
-
-						u_c = one_over_dx;
-						u_d = -one_over_dx;
-
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}
-				}
+				
 			}
 			else if (i == i_end)
 			{
 				if (j == j_start)
 				{
 					// Define b_vector
-					T H_star_n;
-
-					H_star_n = MAX((T)1/sqrt(2)*u.grid.x_max - (T)1/sqrt(2)*u.grid.y_min, MAX(u.grid.x_max, -u.grid.y_min));
-
 					T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
 
 					T H_adv_1 = dxm, H_adv_2 = (T)1/sqrt(2)*dxm - (T)1/sqrt(2)*dyp, H_adv_3 = -dyp;
@@ -632,24 +723,84 @@ public: // Member Function
 						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 					}
 				}
-				if (j != j_start && j != j_end)
+				else if (j == j_end)
 				{
 					// Define b_vector
-					T H_star_n;
+					T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1));
 
-					H_star_n = u.grid.x_max;
-					
-					for (int k = j_start + 1; k < j_end; k++)
+					T H_adv_1 = dxm, H_adv_2 = (T)1/sqrt(2)*dxm + (T)1/sqrt(2)*dym, H_adv_3 = dym;
+
+					// Start with comparison
+					T H_1, H_2, H_3;
+
+					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
+
+					if (H_3 == H_adv_1)
 					{
-						T y_coor = u.grid.y_min + k*u.grid.dy;
-						T comp = -(T)1 / sqrt(2)*y_coor + (T)1 / sqrt(2)*u.grid.x_max;
+						T b_vector_value = H_adv_1 - H_star_n;
 
-						if (H_star_n < comp)
+						b_vector[bc(i, j)] = b_vector_value;
+
+						// Assign Jacobian
+						T u_l, u_c;
+
+						u_l = -one_over_dx;
+						u_c = one_over_dx;
+
+						if (bc(i - 1, j) > -1)
 						{
-							H_star_n = comp;
+							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
 						}
-					}
 
+						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					}
+					else if (H_3 == H_adv_2)
+					{
+						T b_vector_value = H_adv_2 - H_star_n;
+
+						b_vector[bc(i, j)] = b_vector_value;
+
+						// Assign Jacobian
+						T u_l, u_c, u_d;
+
+						u_l = -one_over_dx*(T)1 / sqrt(2);
+						u_c = one_over_dx*(T)2 / sqrt(2);
+						u_d = -one_over_dx*(T)1 / sqrt(2);
+
+						if (bc(i - 1, j) > -1)
+						{
+							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+						}
+						if (bc(i, j - 1) > -1)
+						{
+							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+						}
+
+						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					}
+					else
+					{
+						T b_vector_value = H_adv_3 - H_star_n;
+
+						b_vector[bc(i, j)] = b_vector_value;
+
+						// Assign Jacobian
+						T u_c, u_d;
+
+						u_c = one_over_dx;
+						u_d = -one_over_dx;
+
+						if (bc(i, j - 1) > -1)
+						{
+							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+						}
+
+						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					}
+				}
+				else
+				{
+					// Define b_vector
 					T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
 
 					T H_adv_1 = dxm, H_adv_2 = (T)1/sqrt(2)*dxm + (T)1/sqrt(2)*dym, H_adv_3 = (T)1/sqrt(2)*dxm - (T)1/sqrt(2)*dyp;
@@ -726,613 +877,967 @@ public: // Member Function
 						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 					}	
 				}
-				if (j == j_end)
-				{
-					// Define b_vector
-					T H_star_n;
-
-					H_star_n = MAX((T)1/sqrt(2)*u.grid.x_max + (T)1/sqrt(2)*u.grid.y_max, MAX(u.grid.x_max, u.grid.y_max));
-
-					T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1));
-
-					T H_adv_1 = dxm, H_adv_2 = (T)1/sqrt(2)*dxm + (T)1/sqrt(2)*dym, H_adv_3 = dym;
-
-					// Start with comparison
-					T H_1, H_2, H_3;
-
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-
-					if (H_3 == H_adv_1)
-					{
-						T b_vector_value = H_adv_1 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c;
-
-						u_l = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i - 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}
-					else if (H_3 == H_adv_2)
-					{
-						T b_vector_value = H_adv_2 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c, u_d;
-
-						u_l = -one_over_dx*(T)1 / sqrt(2);
-						u_c = one_over_dx*(T)2 / sqrt(2);
-						u_d = -one_over_dx*(T)1 / sqrt(2);
-
-						if (bc(i - 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-						}
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}
-					else
-					{
-						T b_vector_value = H_adv_3 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_c, u_d;
-
-						u_c = one_over_dx;
-						u_d = -one_over_dx;
-
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}
-				}
 			}
 			else if (j == j_start)
 			{
-				if (i != i_start && i != i_end)
+				// Define b_vector
+				T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
+
+				T H_adv_1 = -dyp, H_adv_2 = -(T)1/sqrt(2)*dxp - (T)1/sqrt(2)*dyp, H_adv_3 = (T)1/sqrt(2)*dxm - (T)1/sqrt(2)*dyp;
+					
+				T H_1, H_2, H_3;
+					
+				INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
+					
+				if (H_3 == H_adv_1)
 				{
-					// Define b_vector
-					T H_star_n(0);
+					T b_vector_value = H_adv_1 - H_star_n;
 
-					H_star_n = -u.grid.y_min;
+					b_vector[bc(i, j)] = b_vector_value;
 
-					for (int k = i_start + 1; k < i_end; k++)
+					// Assign Jacobian
+					T u_u, u_c;
+
+					u_u = -one_over_dx;
+					u_c = one_over_dx;
+
+					if (bc(i, j + 1) > -1)
 					{
-						T x_coor = u.grid.x_min + k*u.grid.dx;
-						T comp = -(T)1 / sqrt(2)*x_coor - (T)1 / sqrt(2)*u.grid.y_min;
-
-						if (H_star_n < comp)
-						{
-							H_star_n = comp;
-						}
+						J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
 					}
 
-					T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+				}
+				else if (H_3 == H_adv_2)
+				{
+					T b_vector_value = H_adv_2 - H_star_n;
 
-					T H_adv_1 = -dyp, H_adv_2 = -(T)1/sqrt(2)*dxp - (T)1/sqrt(2)*dyp, H_adv_3 = (T)1/sqrt(2)*dxm - (T)1/sqrt(2)*dyp;
-					
-					T H_1, H_2, H_3;
-					
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-					
-					if (H_3 == H_adv_1)
+					b_vector[bc(i, j)] = b_vector_value;
+
+					// Assign Jacobian
+					T u_r, u_c, u_u;
+
+					u_r = -one_over_dx*(T)1/sqrt(2);
+					u_c = one_over_dx*(T)2/sqrt(2);
+					u_u = -one_over_dx*(T)1/sqrt(2);
+
+					if (bc(i + 1, j) > -1)
 					{
-						T b_vector_value = H_adv_1 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_u, u_c;
-
-						u_u = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i, j + 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
 					}
-					else if (H_3 == H_adv_2)
+					if (bc(i, j + 1) > -1)
 					{
-						T b_vector_value = H_adv_2 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c, u_u;
-
-						u_r = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_u = -one_over_dx*(T)1/sqrt(2);
-
-						if (bc(i + 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-						}
-						if (bc(i, j + 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
 					}
-					else
+
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+				}
+				else
+				{
+					T b_vector_value = H_adv_3 - H_star_n;
+
+					b_vector[bc(i, j)] = b_vector_value;
+
+					// Assign Jacobian
+					T u_l, u_c, u_u;
+
+					u_l = -one_over_dx*(T)1/sqrt(2);
+					u_c = one_over_dx*(T)2/sqrt(2);
+					u_u = -one_over_dx*(T)1/sqrt(2);
+
+					if (bc(i - 1, j) > -1)
 					{
-						T b_vector_value = H_adv_3 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c, u_u;
-
-						u_l = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_u = -one_over_dx*(T)1/sqrt(2);
-
-						if (bc(i - 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-						}
-						if (bc(i, j + 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
 					}
+					if (bc(i, j + 1) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
+					}
+
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
 			}
 			else if (j == j_end)
 			{
-				if (i != i_start && i != i_end)
+				
+				// Define b_vector
+				T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1));
+
+				T H_adv_1 = dym, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = (T)1/sqrt(2)*dxm + (T)1/sqrt(2)*dym;
+					
+				T H_1, H_2, H_3;
+					
+				INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
+					
+				if (H_3 == H_adv_1)
 				{
-					// Define b_vector
-					T H_star_n;
+					T b_vector_value = H_adv_1 - H_star_n;
 
-					H_star_n = u.grid.y_max;
-					
-					for (int k = i_start + 1; k < i_end; k++)
+					b_vector[bc(i, j)] = b_vector_value;
+
+					// Assign Jacobian
+					T u_d, u_c;
+
+					u_d = -one_over_dx;
+					u_c = one_over_dx;
+
+					if (bc(i, j - 1) > -1)
 					{
-						T x_coor = u.grid.x_min + k*u.grid.dx;
-						T comp = -(T)1 / sqrt(2)*x_coor + (T)1 / sqrt(2)*u.grid.y_max;
-
-						if (H_star_n < comp)
-						{
-							H_star_n = comp;
-						}
+						J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
 					}
 
-					T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1));
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+				}
+				else if (H_3 == H_adv_2)
+				{
+					T b_vector_value = H_adv_2 - H_star_n;
 
-					T H_adv_1 = dym, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = (T)1/sqrt(2)*dxm + (T)1/sqrt(2)*dym;
-					
-					T H_1, H_2, H_3;
-					
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-					
-					if (H_3 == H_adv_1)
+					b_vector[bc(i, j)] = b_vector_value;
+
+					// Assign Jacobian
+					T u_r, u_c, u_d;
+
+					u_r = -one_over_dx*(T)1/sqrt(2);
+					u_c = one_over_dx*(T)2/sqrt(2);
+					u_d = -one_over_dx*(T)1/sqrt(2);
+
+					if (bc(i + 1, j) > -1)
 					{
-						T b_vector_value = H_adv_1 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_d, u_c;
-
-						u_d = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
 					}
-					else if (H_3 == H_adv_2)
+					if (bc(i, j - 1) > -1)
 					{
-						T b_vector_value = H_adv_2 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c, u_d;
-
-						u_r = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_d = -one_over_dx*(T)1/sqrt(2);
-
-						if (bc(i + 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-						}
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
 					}
-					else
+
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+				}
+				else
+				{
+					T b_vector_value = H_adv_3 - H_star_n;
+
+					b_vector[bc(i, j)] = b_vector_value;
+
+					// Assign Jacobian
+					T u_l, u_c, u_d;
+
+					u_l = -one_over_dx*(T)1/sqrt(2);
+					u_c = one_over_dx*(T)2/sqrt(2);
+					u_d = -one_over_dx*(T)1/sqrt(2);
+
+					if (bc(i - 1, j) > -1)
 					{
-						T b_vector_value = H_adv_3 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c, u_d;
-
-						u_l = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_d = -one_over_dx*(T)1/sqrt(2);
-
-						if (bc(i - 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-						}
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
 					}
+					if (bc(i, j - 1) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+					}
+
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
 			}
 			else
 			{
-				if ((MA_array.values[1])(i, j) >= (MA_array.values[0])(i, j))
+				if (is_regularized)
 				{
-					b_vector[bc(i, j)] = (MA_array.values[0])(i, j);
+					b_vector[bc(i, j)] = MA(i, j);
+
+					T max_dxx_r, max_dyy_r, max_dvv_r, max_dvpvp_r, min_dxx_r, min_dyy_r, min_dvv_r, min_dvpvp_r;
+
+					max_dxx_r = (T)0.5*(dxx + sqrt(POW2(dxx) + POW2(delta)));
+					max_dyy_r = (T)0.5*(dyy + sqrt(POW2(dyy) + POW2(delta)));
+					min_dxx_r = (T)0.5*(dxx - sqrt(POW2(dxx) + POW2(delta)));
+					min_dyy_r = (T)0.5*(dyy - sqrt(POW2(dyy) + POW2(delta)));
+
+					max_dvv_r   = (T)0.5*(dvv + sqrt(POW2(dvv) + POW2(delta)));
+					max_dvpvp_r = (T)0.5*(dvpvp + sqrt(POW2(dvpvp) + POW2(delta)));
+					min_dvv_r   = (T)0.5*(dvv - sqrt(POW2(dvv) + POW2(delta)));
+					min_dvpvp_r = (T)0.5*(dvpvp - sqrt(POW2(dvpvp) + POW2(delta)));
+
+					T u_l, u_r, u_c, u_d, u_u, u_dl, u_dr, u_ul, u_ur;
+										
+					// Center Stencil
+					T u_c_1, u_c_2, u_c_3;
+
+					u_c_1 = 0;
+					u_c_1 += (T)0.5*(-2*one_over_dx2 + dxx*(-2*one_over_dx2)/sqrt(POW2(dxx) + POW2(delta)))*max_dyy_r;
+					u_c_1 += (T)0.5*(-2*one_over_dy2 + dyy*(-2*one_over_dy2)/sqrt(POW2(dyy) + POW2(delta)))*max_dxx_r;
+					u_c_1 -= (T)0.5*(-2*one_over_dx2 - dxx*(-2*one_over_dx2)/sqrt(POW2(dxx) + POW2(delta)));
+					u_c_1 -= (T)0.5*(-2*one_over_dy2 - dyy*(-2*one_over_dy2)/sqrt(POW2(dyy) + POW2(delta)));
 					
-					T u_l, u_r, u_c, u_d, u_u;
+					u_c_2 = 0;
+					u_c_2 += (T)0.5*(-2*(T)0.5*one_over_dx2 + dvv*(-2*(T)0.5*one_over_dx2)/sqrt(POW2(dvv) + POW2(delta)))*max_dvpvp_r;
+					u_c_2 += (T)0.5*(-2*(T)0.5*one_over_dy2 + dvpvp*(-2*(T)0.5*one_over_dy2)/sqrt(POW2(dvpvp) + POW2(delta)))*max_dvv_r;
+					u_c_2 -= (T)0.5*(-2*(T)0.5*one_over_dx2 - dvv*(-2*(T)0.5*one_over_dx2)/sqrt(POW2(dvv) + POW2(delta)));
+					u_c_2 -= (T)0.5*(-2*(T)0.5*one_over_dy2 - dvpvp*(-2*(T)0.5*one_over_dy2)/sqrt(POW2(dvpvp) + POW2(delta)));
 
-					if (dxx >= delta)
+					u_c_3 = 0;
+					
+					if (i == mid_i && j == mid_j)
 					{
-						if (dyy >= delta)
-						{
-							u_l = one_over_dx2*dyy;
-							u_r = one_over_dx2*dyy;
-							if (i == mid_i && j == mid_j)
-							{
-								u_c = -2*one_over_dx2*(dxx + dyy) - 1;
-							}
-							else
-							{
-								u_c = -2*one_over_dx2*(dxx + dyy);
-							}
-							u_d = one_over_dy2*dxx;
-							u_u = one_over_dy2*dxx;
-
-							if (bc(i - 1, j) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-							}
-							if (bc(i + 1, j) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-							}
-							if (bc(i, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-							}
-							if (bc(i, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-							}
-
-							J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id); 
-						}
-						else
-						{
-							u_l = one_over_dx2*delta;
-							u_r = one_over_dx2*delta;
-							if (i == mid_i && j == mid_j)
-							{
-								u_c = -2*one_over_dx2*(delta - 1) - 1;
-							}
-							else
-							{
-								u_c = -2*one_over_dx2*(delta - 1);
-							}
-							u_d = -one_over_dy2;
-							u_u = -one_over_dy2;
-
-							if (bc(i - 1, j) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-							}
-							if (bc(i + 1, j) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-							}
-							if (bc(i, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-							}
-							if (bc(i, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-							}
-
-							J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-						}
+						u_c_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_c_1 - u_c_2 - 2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
 					}
 					else
 					{
-						T u_l, u_r, u_c, u_d, u_u;
-
-						if (dyy >= delta)
-						{
-							u_l = -one_over_dx2;
-							u_r = -one_over_dx2;
-							if (i == mid_i && j == mid_j)
-							{
-								u_c = -2*one_over_dx2*(delta - 1) - 1;
-							}
-							else
-							{
-								u_c = -2*one_over_dx2*(delta - 1);
-							}
-							u_d = one_over_dy2*delta;
-							u_u = one_over_dy2*delta;
-
-							if (bc(i - 1, j) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-							}
-							if (bc(i + 1, j) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-							}
-							if (bc(i, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-							}
-							if (bc(i, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-							}
-
-							J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-						}
-						else
-						{
-							u_l = -one_over_dx2;
-							u_r = -one_over_dx2;
-							if (i == mid_i && j == mid_j)
-							{
-								u_c = 4*one_over_dx2 - 1;
-							}
-							else
-							{
-								u_c = 4*one_over_dx2;
-							}
-							u_d = -one_over_dy2;
-							u_u = -one_over_dy2;
-
-							if (bc(i - 1, j) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-							}
-							if (bc(i + 1, j) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-							}
-							if (bc(i, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-							}
-							if (bc(i, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-							}
-
-							J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-						}
+						u_c_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_c_1 - u_c_2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
 					}
+					
+					u_c = 0;
+					
+					if (i == mid_i && j == mid_j)
+					{
+						u_c = u_c_1 + u_c_2 - 2 - u_c_3; 
+					}
+					else
+					{
+						u_c = u_c_1 + u_c_2 - u_c_3; 
+					}
+					
+					// Left Stencil
+					T u_l_1, u_l_2, u_l_3;
+
+					u_l_1 = 0;
+					u_l_1 += (T)0.5*(one_over_dx2 + dxx*one_over_dx2/sqrt(POW2(dxx) + POW2(delta)))*max_dyy_r;
+					u_l_1 -= (T)0.5*(one_over_dx2 - dxx*one_over_dx2/sqrt(POW2(dxx) + POW2(delta)));
+										
+					u_l_2 = 0;
+					
+					u_l_3 = 0;
+					
+					if (i == mid_i && j == mid_j)
+					{
+						u_l_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_l_1 - u_l_2 - 2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					else
+					{
+						u_l_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_l_1 - u_l_2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					
+					u_l = 0;
+
+					if (i == mid_i && j == mid_j)
+					{
+						u_l = u_l_1 + u_l_2 - 2 - u_l_3; 
+					}
+					else
+					{
+						u_l = u_l_1 + u_l_2 - u_l_3; 
+					}
+					
+					// Right Stencil
+					T u_r_1, u_r_2, u_r_3;
+
+					u_r_1 = 0;
+					u_r_1 += (T)0.5*(one_over_dx2 + dxx*one_over_dx2/sqrt(POW2(dxx) + POW2(delta)))*max_dyy_r;
+					u_r_1 -= (T)0.5*(one_over_dx2 - dxx*one_over_dx2/sqrt(POW2(dxx) + POW2(delta)));
+									
+					u_r_2 = 0;
+					
+					u_r_3 = 0;
+					u_r_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_r_1 - u_r_2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+
+					u_r = 0;
+					u_r = u_r_1 + u_r_2 - u_r_3; 
+
+					// Upper Stencil
+					T u_u_1, u_u_2, u_u_3;
+
+					u_u_1 = 0;
+					u_u_1 += (T)0.5*(one_over_dy2 + dyy*one_over_dy2/sqrt(POW2(dyy) + POW2(delta)))*max_dxx_r;
+					u_u_1 -= (T)0.5*(one_over_dy2 - dyy*one_over_dy2/sqrt(POW2(dyy) + POW2(delta)));
+					
+					u_u_2 = 0;
+					
+					u_u_3 = 0;
+					
+					if (i == mid_i && j == mid_j)
+					{
+						u_u_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_u_1 - u_u_2 - 2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					else
+					{
+						u_u_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_u_1 - u_u_2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					
+
+					u_u = 0;
+					if (i == mid_i && j == mid_j)
+					{
+						u_u = u_u_1 + u_u_2 - 2 - u_u_3; 
+					}
+					else
+					{
+						u_u = u_u_1 + u_u_2 - u_u_3; 
+					}
+
+					// Lower Stencil
+					T u_d_1, u_d_2, u_d_3;
+
+					u_d_1 = 0;
+					u_d_1 += (T)0.5*(one_over_dy2 + dyy*one_over_dy2/sqrt(POW2(dyy) + POW2(delta)))*max_dxx_r;
+					u_d_1 -= (T)0.5*(one_over_dy2 - dyy*one_over_dy2/sqrt(POW2(dyy) + POW2(delta)));
+					
+					u_d_2 = 0;
+					
+					u_d_3 = 0;
+					
+					if (i == mid_i && j == mid_j)
+					{
+						u_d_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_u_1 - u_u_2 - 2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					else
+					{
+						u_d_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_u_1 - u_u_2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					
+
+					u_d = 0;
+					
+					if (i == mid_i && j == mid_j)
+					{
+						u_d = u_d_1 + u_d_2 - 2 - u_d_3; 
+					}
+					else
+					{
+						u_d = u_d_1 + u_d_2 - u_d_3; 
+					}
+
+					// Upper-Right Stencil
+					T u_ur_1, u_ur_2, u_ur_3;
+
+					u_ur_1 = 0;
+										
+					u_ur_2 = 0;
+					u_ur_2 += (T)0.5*((T)0.5*one_over_dx2 + dvv*((T)0.5*one_over_dx2)/sqrt(POW2(dvv) + POW2(delta)))*max_dvpvp_r;
+					u_ur_2 -= (T)0.5*((T)0.5*one_over_dx2 - dvv*((T)0.5*one_over_dx2)/sqrt(POW2(dvv) + POW2(delta)));
+
+					u_ur_3 = 0;
+
+					if (i == mid_i && j == mid_j)
+					{
+						u_ur_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_ur_1 - u_ur_2 - 2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					else
+					{
+						u_ur_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_ur_1 - u_ur_2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+
+					u_ur = 0;
+					
+					if (i == mid_i && j == mid_j)
+					{
+						u_ur = u_ur_1 + u_ur_2 - 2 - u_ur_3; 
+					}
+					else
+					{
+						u_ur = u_ur_1 + u_ur_2 - u_ur_3; 
+					}
+
+					// Down-Left Stencil
+					T u_dl_1, u_dl_2, u_dl_3;
+
+					u_dl_1 = 0;
+										
+					u_dl_2 = 0;
+					u_dl_2 += (T)0.5*((T)0.5*one_over_dx2 + dvv*((T)0.5*one_over_dx2)/sqrt(POW2(dvv) + POW2(delta)))*max_dvpvp_r;
+					u_dl_2 -= (T)0.5*((T)0.5*one_over_dx2 - dvv*((T)0.5*one_over_dx2)/sqrt(POW2(dvv) + POW2(delta)));
+
+					u_dl_3 = 0;
+
+					if (i == mid_i && j == mid_j)
+					{
+						u_dl_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_dl_1 - u_dl_2 - 2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					else
+					{
+						u_dl_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_dl_1 - u_dl_2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+
+					u_dl = 0;
+					
+					if (i == mid_i && j == mid_j)
+					{
+						u_dl = u_dl_1 + u_dl_2 - 2 - u_dl_3; 
+					}
+					else
+					{
+						u_dl = u_dl_1 + u_dl_2 - u_dl_3; 
+					}
+					
+					// Upper-Left Stencil
+					T u_ul_1, u_ul_2, u_ul_3;
+
+					u_ul_1 = 0;
+										
+					u_ul_2 = 0;
+					u_ul_2 += (T)0.5*((T)0.5*one_over_dy2 + dvpvp*((T)0.5*one_over_dy2)/sqrt(POW2(dvpvp) + POW2(delta)))*max_dvv_r;
+					u_ul_2 -= (T)0.5*((T)0.5*one_over_dy2 - dvpvp*((T)0.5*one_over_dy2)/sqrt(POW2(dvpvp) + POW2(delta)));
+
+					u_ul_3 = 0;
+
+					if (i == mid_i && j == mid_j)
+					{
+						u_ul_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_ul_1 - u_ul_2 - 2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					else
+					{
+						u_ul_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_ul_1 - u_ul_2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					
+					u_ul = 0;
+
+					if (i == mid_i && j == mid_j)
+					{
+						u_ul = u_ul_1 + u_ul_2 - 2 - u_ul_3; 
+					}
+					else
+					{
+						u_ul = u_ul_1 + u_ul_2 - u_ul_3; 
+					}
+
+					// Down-Right Stencil
+					T u_dr_1, u_dr_2, u_dr_3;
+
+					u_dr_1 = 0;
+										
+					u_dr_2 = 0;
+					u_dr_2 += (T)0.5*((T)0.5*one_over_dy2 + dvpvp*((T)0.5*one_over_dy2)/sqrt(POW2(dvpvp) + POW2(delta)))*max_dvv_r;
+					u_dr_2 -= (T)0.5*((T)0.5*one_over_dy2 - dvpvp*((T)0.5*one_over_dy2)/sqrt(POW2(dvpvp) + POW2(delta)));
+
+					u_dr_3 = 0;
+
+					if (i == mid_i && j == mid_j)
+					{
+						u_dr_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_dr_1 - u_dr_2 - 2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+					else
+					{
+						u_dr_3 = (MA_array[0].array_for_this(i, j) - MA_array[0].array_for_this(i, j))*(u_dr_1 - u_dr_2)/sqrt(POW2(MA_array[0].array_for_this(i, j) - MA_array[1].array_for_this(i, j)) + POW2(delta));
+					}
+
+					u_dr = 0;
+
+					if (i == mid_i && j == mid_j)
+					{
+						u_dr = u_dr_1 + u_dr_2 - 2 - u_dr_3; 
+					}
+					else
+					{
+						u_dr = u_dr_1 + u_dr_2 - u_dr_3; 
+					}
+
+					if (bc(i - 1, j) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+					}
+					if (bc(i + 1, j) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+					}
+					if (bc(i, j - 1) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+					}
+					if (bc(i, j + 1) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
+					}
+					
+					if (bc(i - 1, j - 1) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i - 1, j - 1), u_dl, thread_id);
+					}
+					if (bc(i + 1, j + 1) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i + 1, j + 1), u_ur, thread_id);
+					}
+					if (bc(i + 1, j - 1) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i + 1, j - 1), u_dr, thread_id);
+					}
+					if (bc(i - 1, j + 1) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i - 1, j + 1), u_ul, thread_id);
+					}
+
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id); 
 				}
 				else
 				{
-					b_vector[bc(i, j)] = (MA_array.values[1])(i, j);
-
-					T u_dl, u_ur, u_c, u_dr, u_ul;
-
-					if (dvv >= delta)
+					if ((MA_array.values[1])(i, j) >= (MA_array.values[0])(i, j))
 					{
-						if (dvpvp >= delta)
+						b_vector[bc(i, j)] = MA(i, j);
+
+						T u_l, u_r, u_c, u_d, u_u;
+
+						if (dxx >= delta)
 						{
-							u_dl = (T)1/2*one_over_dx2*dvpvp;
-							u_ur = (T)1/2*one_over_dx2*dvpvp;
-							if (i == mid_i && j == mid_j)
+							if (dyy >= delta)
 							{
-								u_c  = -one_over_dx2*(dvv + dvpvp) - 1;
+								u_l = one_over_dx2*dyy;
+								u_r = one_over_dx2*dyy;
+								if (i == mid_i && j == mid_j)
+								{
+									u_c = -2*one_over_dx2*(dxx + dyy) - 1;
+								}
+								else
+								{
+									u_c = -2*one_over_dx2*(dxx + dyy);
+								}
+								u_d = one_over_dy2*dxx;
+								u_u = one_over_dy2*dxx;
+
+								if (bc(i - 1, j) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+								}
+								if (bc(i + 1, j) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+								}
+								if (bc(i, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+								}
+								if (bc(i, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
+								}
+
+								J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id); 
 							}
 							else
 							{
-								u_c  = -one_over_dx2*(dvv + dvpvp);
-							}
-							u_dr = (T)1/2*one_over_dx2*dvv;
-							u_ul = (T)1/2*one_over_dx2*dvv;
+								u_l = one_over_dx2*delta;
+								u_r = one_over_dx2*delta;
+								if (i == mid_i && j == mid_j)
+								{
+									u_c = -2*one_over_dx2*(delta - 1) - 1;
+								}
+								else
+								{
+									u_c = -2*one_over_dx2*(delta - 1);
+								}
+								u_d = -one_over_dy2;
+								u_u = -one_over_dy2;
 
-							if (bc(i - 1, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j - 1), u_dl, thread_id);
-							}
-							if (bc(i + 1, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j + 1), u_ur, thread_id);
-							}
-							if (bc(i + 1, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j - 1), u_dr, thread_id);
-							}
-							if (bc(i - 1, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j + 1), u_ul, thread_id);
-							}
+								if (bc(i - 1, j) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+								}
+								if (bc(i + 1, j) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+								}
+								if (bc(i, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+								}
+								if (bc(i, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
+								}
 
-							J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+								J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+							}
 						}
 						else
 						{
-							u_dl = (T)1/2*one_over_dx2*delta;
-							u_ur = (T)1/2*one_over_dx2*delta;
-							if (i == mid_i && j == mid_j)
+							T u_l, u_r, u_c, u_d, u_u;
+
+							if (dyy >= delta)
 							{
-								u_c  = -one_over_dx2*(delta - 1) - 1;
+								u_l = -one_over_dx2;
+								u_r = -one_over_dx2;
+								if (i == mid_i && j == mid_j)
+								{
+									u_c = -2*one_over_dx2*(delta - 1) - 1;
+								}
+								else
+								{
+									u_c = -2*one_over_dx2*(delta - 1);
+								}
+								u_d = one_over_dy2*delta;
+								u_u = one_over_dy2*delta;
+
+								if (bc(i - 1, j) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+								}
+								if (bc(i + 1, j) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+								}
+								if (bc(i, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+								}
+								if (bc(i, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
+								}
+
+								J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 							}
 							else
 							{
-								u_c  = -one_over_dx2*(delta - 1);
-							}
-							u_dr = -(T)1/2*one_over_dx2;
-							u_ul = -(T)1/2*one_over_dx2;
+								u_l = -one_over_dx2;
+								u_r = -one_over_dx2;
+								if (i == mid_i && j == mid_j)
+								{
+									u_c = 4*one_over_dx2 - 1;
+								}
+								else
+								{
+									u_c = 4*one_over_dx2;
+								}
+								u_d = -one_over_dy2;
+								u_u = -one_over_dy2;
 
-							if (bc(i - 1, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j - 1), u_dl, thread_id);
-							}
-							if (bc(i + 1, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j + 1), u_ur, thread_id);
-							}
-							if (bc(i + 1, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j - 1), u_dr, thread_id);
-							}
-							if (bc(i - 1, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j + 1), u_ul, thread_id);
-							}
+								if (bc(i - 1, j) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+								}
+								if (bc(i + 1, j) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+								}
+								if (bc(i, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+								}
+								if (bc(i, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
+								}
 
-							J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+								J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+							}
 						}
 					}
 					else
 					{
+						b_vector[bc(i, j)] = MA(i, j);
+
 						T u_dl, u_ur, u_c, u_dr, u_ul;
 
-						if (dvpvp >= delta)
+						if (dvv >= delta)
 						{
-							u_dl = -(T)1/2*one_over_dx2;
-							u_ur = -(T)1/2*one_over_dx2;
-							if (i == mid_i && j == mid_j)
+							if (dvpvp >= delta)
 							{
-								u_c  = -one_over_dx2*(delta - 1) - 1;
+								u_dl = (T)1/2*one_over_dx2*dvpvp;
+								u_ur = (T)1/2*one_over_dx2*dvpvp;
+								if (i == mid_i && j == mid_j)
+								{
+									u_c  = -one_over_dx2*(dvv + dvpvp) - 1;
+								}
+								else
+								{
+									u_c  = -one_over_dx2*(dvv + dvpvp);
+								}
+								u_dr = (T)1/2*one_over_dx2*dvv;
+								u_ul = (T)1/2*one_over_dx2*dvv;
+
+								if (bc(i - 1, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j - 1), u_dl, thread_id);
+								}
+								if (bc(i + 1, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j + 1), u_ur, thread_id);
+								}
+								if (bc(i + 1, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j - 1), u_dr, thread_id);
+								}
+								if (bc(i - 1, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j + 1), u_ul, thread_id);
+								}
+
+								J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 							}
 							else
 							{
-								u_c  = -one_over_dx2*(delta - 1);
-							}
-							u_dr = (T)1/2*one_over_dx2*delta;
-							u_ul = (T)1/2*one_over_dx2*delta;
+								u_dl = (T)1/2*one_over_dx2*delta;
+								u_ur = (T)1/2*one_over_dx2*delta;
+								if (i == mid_i && j == mid_j)
+								{
+									u_c  = -one_over_dx2*(delta - 1) - 1;
+								}
+								else
+								{
+									u_c  = -one_over_dx2*(delta - 1);
+								}
+								u_dr = -(T)1/2*one_over_dx2;
+								u_ul = -(T)1/2*one_over_dx2;
 
-							if (bc(i - 1, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j - 1), u_dl, thread_id);
-							}
-							if (bc(i + 1, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j + 1), u_ur, thread_id);
-							}
-							if (bc(i + 1, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j - 1), u_dr, thread_id);
-							}
-							if (bc(i - 1, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j + 1), u_ul, thread_id);
-							}
+								if (bc(i - 1, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j - 1), u_dl, thread_id);
+								}
+								if (bc(i + 1, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j + 1), u_ur, thread_id);
+								}
+								if (bc(i + 1, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j - 1), u_dr, thread_id);
+								}
+								if (bc(i - 1, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j + 1), u_ul, thread_id);
+								}
 
-							J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+								J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+							}
 						}
 						else
 						{
-							u_dl = -(T)1/2*one_over_dx2;
-							u_ur = -(T)1/2*one_over_dx2;
-							if (i == mid_i && j == mid_j)
+							T u_dl, u_ur, u_c, u_dr, u_ul;
+
+							if (dvpvp >= delta)
 							{
-								u_c  = (T)2*one_over_dx2 - 1;
+								u_dl = -(T)1/2*one_over_dx2;
+								u_ur = -(T)1/2*one_over_dx2;
+								if (i == mid_i && j == mid_j)
+								{
+									u_c  = -one_over_dx2*(delta - 1) - 1;
+								}
+								else
+								{
+									u_c  = -one_over_dx2*(delta - 1);
+								}
+								u_dr = (T)1/2*one_over_dx2*delta;
+								u_ul = (T)1/2*one_over_dx2*delta;
+
+								if (bc(i - 1, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j - 1), u_dl, thread_id);
+								}
+								if (bc(i + 1, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j + 1), u_ur, thread_id);
+								}
+								if (bc(i + 1, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j - 1), u_dr, thread_id);
+								}
+								if (bc(i - 1, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j + 1), u_ul, thread_id);
+								}
+
+								J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 							}
 							else
 							{
-								u_c  = (T)2*one_over_dx2;
-							}
-							u_dr = -(T)1/2*one_over_dx2;
-							u_ul = -(T)1/2*one_over_dx2;
+								u_dl = -(T)1/2*one_over_dx2;
+								u_ur = -(T)1/2*one_over_dx2;
+								if (i == mid_i && j == mid_j)
+								{
+									u_c  = (T)2*one_over_dx2 - 1;
+								}
+								else
+								{
+									u_c  = (T)2*one_over_dx2;
+								}
+								u_dr = -(T)1/2*one_over_dx2;
+								u_ul = -(T)1/2*one_over_dx2;
 
-							if (bc(i - 1, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j - 1), u_dl, thread_id);
-							}
-							if (bc(i + 1, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j + 1), u_ur, thread_id);
-							}
-							if (bc(i + 1, j - 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i + 1, j - 1), u_dr, thread_id);
-							}
-							if (bc(i - 1, j + 1) > -1)
-							{
-								J.AssignValue(bc(i, j), bc(i - 1, j + 1), u_ul, thread_id);
-							}
+								if (bc(i - 1, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j - 1), u_dl, thread_id);
+								}
+								if (bc(i + 1, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j + 1), u_ur, thread_id);
+								}
+								if (bc(i + 1, j - 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i + 1, j - 1), u_dr, thread_id);
+								}
+								if (bc(i - 1, j + 1) > -1)
+								{
+									J.AssignValue(bc(i, j), bc(i - 1, j + 1), u_ul, thread_id);
+								}
 
-							J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+								J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+							}
 						}
-					}
+					} 
 				} 
 			}
 		}
 		END_GRID_ITERATION_2D;
 	}
 
-	int CountNonZeroElements(const FIELD_STRUCTURE_2D<int>& bc, const int& thread_id)
+	int CountNonZeroElements(const FIELD_STRUCTURE_2D<int>& bc, const int& thread_id, const ARRAY<FIELD_STRUCTURE_2D<T>>& stencil)
 	{
 		int nnz(0);
-				
+		
 		BEGIN_GRID_ITERATION_2D(bc.partial_grids[thread_id])
 		{
 			if (bc(i, j) > -1)
 			{
 				nnz++;
-				if (bc(i + 1, j) > -1)
+				
+				// For the boundary update
+				if (i == i_start)
 				{
-					nnz++;
+					if (bc(i + 1, j) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i - 1, j) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i, j + 1) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i, j - 1) > -1)
+					{
+						nnz++;
+					} 
 				}
-				if (bc(i - 1, j) > -1)
+				else if (i == i_end)
 				{
-					nnz++;
+					if (bc(i + 1, j) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i - 1, j) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i, j + 1) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i, j - 1) > -1)
+					{
+						nnz++;
+					} 
 				}
-				if (bc(i, j + 1) > -1)
+				else if (j == j_start)
 				{
-					nnz++;
+					if (bc(i + 1, j) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i - 1, j) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i, j + 1) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i, j - 1) > -1)
+					{
+						nnz++;
+					} 
 				}
-				if (bc(i, j - 1) > -1)
+				else if (j == j_end)
 				{
-					nnz++;
+					if (bc(i + 1, j) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i - 1, j) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i, j + 1) > -1)
+					{
+						nnz++;
+					}
+					if (bc(i, j - 1) > -1)
+					{
+						nnz++;
+					} 
+				}
+				else
+				{
+					if (is_regularized)
+					{
+						if (bc(i + 1, j) > -1)
+						{
+							nnz++;
+						}
+						if (bc(i - 1, j) > -1)
+						{
+							nnz++;
+						}
+						if (bc(i, j + 1) > -1)
+						{
+							nnz++;
+						}
+						if (bc(i, j - 1) > -1)
+						{
+							nnz++;
+						}
+						if (bc(i - 1, j - 1) > -1)
+						{
+							nnz++;
+						}
+						if (bc(i - 1, j + 1) > -1)
+						{
+							nnz++;
+						}
+						if (bc(i + 1, j - 1) > -1)
+						{
+							nnz++;
+						}
+						if (bc(i + 1, j + 1) > -1)
+						{
+							nnz++;
+						} 
+					}
+					else
+					{
+						if (stencil.values[1].array_for_this(i, j) >= stencil.values[0].array_for_this(i, j))
+						{
+							if (bc(i + 1, j) > -1)
+							{
+								nnz++;
+							}
+							if (bc(i - 1, j) > -1)
+							{
+								nnz++;
+							}
+							if (bc(i, j + 1) > -1)
+							{
+								nnz++;
+							}
+							if (bc(i, j - 1) > -1)
+							{
+								nnz++;
+							} 
+						}
+						else
+						{
+							if (bc(i - 1, j - 1) > -1)
+							{
+								nnz++;
+							}
+							if (bc(i - 1, j + 1) > -1)
+							{
+								nnz++;
+							}
+							if (bc(i + 1, j - 1) > -1)
+							{
+								nnz++;
+							}
+							if (bc(i + 1, j + 1) > -1)
+							{
+								nnz++;
+							} 
+						} 
+					}
 				}
 			}
 		}
@@ -1345,19 +1850,16 @@ public: // Member Function
 	{
 		// For initializing Jacobian
 		const int num_all_full_cells = AssignSequentialindicesToFullCells(bc, thread_id);
-		const int nnz = CountNonZeroElements(bc, thread_id);
 		
-		HEAD_THREAD_WORK(J.Initialize(num_all_full_cells, nnz, multithreading));
-
 		BEGIN_HEAD_THREAD_WORK
 		{
-			multithreading->SplitDomainIndex1D(0, J.N);
+			multithreading->SplitDomainIndex1D(0, num_all_full_cells);
 		}
 		END_HEAD_THREAD_WORK;
 
 		BEGIN_HEAD_THREAD_WORK
 		{
-			x.Initialize(J.N, true);	
+			x.Initialize(num_all_full_cells, true);	
 		}
 		END_HEAD_THREAD_WORK;
 		
@@ -1371,7 +1873,7 @@ public: // Member Function
 		
 		BEGIN_HEAD_THREAD_WORK
 		{
-			Jb.Initialize(N, true);
+			Jb.Initialize(num_all_full_cells, true);
 		}
 		END_HEAD_THREAD_WORK;
 			
@@ -1423,9 +1925,67 @@ public: // Member Function
 
 			CalculateJacobian(J, b_vector, thread_id);
 			
+			ofstream fout;
+			fout.open("one_over_2dx");
+			fout << bc.grid.one_over_2dx << endl;
+			fout.close();
+
+			fout.open("val");
+			for (int i = 0; i < J.nz; i++)
+			{
+				fout << J.values[i] << endl;
+			}
+			fout.close();
+
+			fout.open("ci");
+			for (int i = 0; i < J.nz; i++)
+			{
+				fout << J.column_index[i] << endl;
+			}
+			fout.close();
+
+			fout.open("rp");
+			for (int i = 0; i <= J.N; i++)
+			{
+				fout << J.row_ptr[i] << endl;
+			}
+			fout.close();
+
+			fout.open("b_vector");
+			for (int i = 0; i < J.N; i++)
+			{
+				fout << b_vector[i] << endl;
+			}
+			fout.close();
+
 			sub_linear_solver->Solve(J, Jb, b_vector, bc, thread_id);
 
+			fout.open("Jb_vector");
+			for (int i = 0; i < J.N; i++)
+			{
+				fout << Jb[i] << endl;
+			}
+			fout.close();
+
 			GridToVector(u, x, bc, thread_id);
+
+			fout.open("u_vector");
+			for (int i = 0; i < J.N; i++)
+			{
+				fout << x[i] << endl;
+			}
+			fout.close();
+
+			fout.open("bc");
+			for (int i = bc.i_start; i <= bc.i_end; i++)
+			{
+				for (int j = bc.j_start; j <= bc.j_end; j++)
+				{
+					fout << bc(i, j) << " ";
+				}
+				fout << endl;
+			}
+			fout.close();
 
 			for (int i = start_ix; i <= end_ix; i++)
 			{
@@ -1443,8 +2003,9 @@ public: // Member Function
 
 			VectorToGrid(x, u, bc, thread_id);
 
+			//VectorToGrid(Jb, u, bc, thread_id);
 			/*ofstream fout;
-			fout.open("solution");
+			fout.open("Jb");
 			for (int j = u.j_start; j <= u.j_end; j++)
 			{
 				for (int i = u.i_start; i <= u.i_end; i++)
@@ -1496,6 +2057,7 @@ public: // Member Function
 			BEGIN_HEAD_THREAD_WORK
 			{
 				num_iteration++;
+				delta = (T)0.5*delta;
 				cout << "Increment: " << stopping_criterion << endl;
 			}
 			END_HEAD_THREAD_WORK;

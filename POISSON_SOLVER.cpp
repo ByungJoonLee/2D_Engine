@@ -26,7 +26,11 @@ void POISSON_SOLVER::InitializeLinearSolver(const POISSON_SOLVER_TYPE linear_sol
 	case PCG:
 		linear_solver = new PCG_METHOD();
 		break;
-		
+	
+	case BICG:
+		linear_solver = new BICGSTAB_METHOD();
+		break;
+
 	case NO_SOLVER:
 		
 	default:

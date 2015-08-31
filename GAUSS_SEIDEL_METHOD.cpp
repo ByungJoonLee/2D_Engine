@@ -33,11 +33,11 @@ void GAUSS_SEIDEL_METHOD::GaussSeidelMethod(const CSR_MATRIX<T>& A, VECTOR_ND<T>
 
 		if(residual < tolerance) 
 		{
-			/*cout << "--------------Gauss-Seidel Iteration--------------" << endl;
+			cout << "--------------Gauss-Seidel Iteration--------------" << endl;
 			cout << "Converge!!" << endl;
 			cout << "Iteration Number : " << num_iteration << endl;
 			cout << "Residual: " << residual << endl;
-			cout << "--------------------------------------------------" << endl;*/
+			cout << "--------------------------------------------------" << endl;
 			break;
 		}
 		if (i == max_iteration - 1)
