@@ -8,6 +8,7 @@
 #include "GAUSS_SEIDEL_METHOD.h"
 #include "POISSON_SOLVER.h"
 #include "BICGSTAB_METHOD.h"
+#include "MATRIX_2X2.h"
 
 class MONGE_AMPERE_SOLVER
 {
@@ -19,7 +20,7 @@ public: // Main variables
 	FIELD_STRUCTURE_2D<VT>				grad_u;
 
 	FIELD_STRUCTURE_2D<VT>				true_solution;
-
+	
 	FIELD_STRUCTURE_2D<T>				density_x;
 	FIELD_STRUCTURE_2D<T>				density_y;
 	FIELD_STRUCTURE_2D<T>				density_h_x;
@@ -66,12 +67,14 @@ public: // For Newton Method
 
 	bool								is_regularized;
 
+	T									l2_norm, max_norm;
+
 public: // Test
 	int									test_number;
 
 public: // Constructor and Destructor
 	MONGE_AMPERE_SOLVER(void)
-		: multithreading(0), sub_linear_solver(0), is_regularized(false), n_y(32)
+		: multithreading(0), sub_linear_solver(0), is_regularized(false), n_y(32), l2_norm(0), max_norm(0)
 	{}
 
 	~MONGE_AMPERE_SOLVER(void)
@@ -90,7 +93,7 @@ public: // Initialization Function
 		grad_u.Initialize(base_grid, 1, multithreading);
 
 		true_solution.Initialize(base_grid, 1, multithreading);
-
+		
 		density_x.Initialize(base_grid, 1, multithreading);
 		density_y.Initialize(base_grid, 1, multithreading);
 		density_h_x.Initialize(base_grid, 1, multithreading);
@@ -226,13 +229,65 @@ public: // Initialization Function
 public: // Member Function
 	void SolveThreaded(const int& thread_id)
 	{
-		SetupDensity(thread_id);
+		//SetupDensity(thread_id);
 		SetupInitialForNewtonMethod(thread_id);
 		SetupBoundaryCondition(bc, thread_id);
 		NewtonMethod(jacobian, x, b, thread_id);
 		ComputeGradient();
+		
+		ofstream fout;
+		fout.open("grad_x");
+		for (int i = bc.i_start; i <= bc.i_end; i++)
+		{
+			for (int j = bc.j_start; j <= bc.j_end; j++)
+			{
+				fout << grad_u(i, j).x << " ";
+			}
+			fout << endl;
+		}
+		fout.close();
+
+		ComputeErrorInL2Norm(thread_id);
+		ComputeErrorInMaxNorm(thread_id);
+
+		BEGIN_HEAD_THREAD_WORK
+		{
+			cout << "L2 norm: " << l2_norm << endl;
+			cout << "Max norm: " << max_norm << endl;
+		}
+		END_HEAD_THREAD_WORK;
 	}
 	
+	void ComputeErrorInL2Norm(const int& thread_id)
+	{
+		BEGIN_HEAD_THREAD_WORK
+		{
+			l2_norm = 0;
+		}
+		END_HEAD_THREAD_WORK;
+		
+		BEGIN_GRID_ITERATION_2D(grad_u.partial_grids[thread_id])
+		{
+			l2_norm += sqrt(POW2(true_solution(i, j).x - grad_u(i, j).x) + POW2(true_solution(i, j).y - grad_u(i, j).y))*grad_u.grid.dx2;
+		}
+		END_GRID_ITERATION_SUM(l2_norm);
+	}
+	
+	void ComputeErrorInMaxNorm(const int& thread_id)
+	{
+		BEGIN_HEAD_THREAD_WORK
+		{
+			max_norm = 0;
+		}
+		END_HEAD_THREAD_WORK;
+		
+		BEGIN_GRID_ITERATION_2D(grad_u.partial_grids[thread_id])
+		{
+			max_norm = MAX(max_norm, sqrt(POW2(true_solution(i, j).x - grad_u(i, j).x) + POW2(true_solution(i, j).y - grad_u(i, j).y)));
+		}
+		END_GRID_ITERATION_MAX_2D(max_norm);
+	}
+
 	void AssignStencil(const FIELD_STRUCTURE_2D<T>& rho_x, const FIELD_STRUCTURE_2D<T>& rho_y_1, const FIELD_STRUCTURE_2D<T>& rho_y_2, const int& thread_id)
 	{
 		// Speedup Variable
@@ -375,75 +430,6 @@ public: // Member Function
 				H_n[k] = MAX(H_n[k], DotProduct(y_0, tn));
 			}
 		}
-		
-		// Left Boundary
-		for (int j = j_start; j <= j_end; j++)
-		{
-			T dot_1, dot_2, dot_3;
-
-			T x_coor = x_min + i_end*dx, y_coor = y_min + j*dy;
-
-			VT n1(1, 0), n2((T)1/sqrt(2), (T)1/sqrt(2)), n3((T)1/sqrt(2), -(T)1/sqrt(2)), y_0(x_coor, y_coor);
-
-			dot_1 = DotProduct(y_0, n1);
-			dot_2 = DotProduct(y_0, n2);
-			dot_3 = DotProduct(y_0, n3);
-			
-			T a, b, c;
-			
-			INCREASING_SORT3(dot_1, dot_2, dot_3, a, b, c);
-
-			if (c >= H_star_n)
-			{
-				H_star_n = c;
-			}
-		}
-
-		// Lower Boundary
-		for (int i = i_start; i <= i_end; i++)
-		{
-			T dot_1, dot_2, dot_3;
-
-			T x_coor = x_min + i*dx, y_coor = y_min + j_start*dy;
-
-			VT n1(0, -1), n2((T)1/sqrt(2), -(T)1/sqrt(2)), n3(-(T)1/sqrt(2), -(T)1/sqrt(2)), y_0(x_coor, y_coor);
-
-			dot_1 = DotProduct(y_0, n1);
-			dot_2 = DotProduct(y_0, n2);
-			dot_3 = DotProduct(y_0, n3);
-			
-			T a, b, c;
-			
-			INCREASING_SORT3(dot_1, dot_2, dot_3, a, b, c);
-
-			if (c >= H_star_n)
-			{
-				H_star_n = c;
-			}
-		}
-
-		// Upper Boundary
-		for (int i = i_start; i <= i_end; i++)
-		{
-			T dot_1, dot_2, dot_3;
-
-			T x_coor = x_min + i*dx, y_coor = y_min + j_end*dy;
-
-			VT n1(0, 1), n2((T)1/sqrt(2), (T)1/sqrt(2)), n3(-(T)1/sqrt(2), (T)1/sqrt(2)), y_0(x_coor, y_coor);
-
-			dot_1 = DotProduct(y_0, n1);
-			dot_2 = DotProduct(y_0, n2);
-			dot_3 = DotProduct(y_0, n3);
-			
-			T a, b, c;
-			
-			INCREASING_SORT3(dot_1, dot_2, dot_3, a, b, c);
-
-			if (c >= H_star_n)
-			{
-				H_star_n = c;
-			}
-		}
 
 		BEGIN_GRID_ITERATION_2D(u.partial_grids[thread_id])
 		{
@@ -467,150 +453,98 @@ public: // Member Function
 					// Define b_vector
 					T dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
 
-					T H_adv_1 = -dxp, H_adv_2 = -(T)1/sqrt(2)*dxp - (T)1/sqrt(2)*dyp, H_adv_3 = -dyp;
+					T b_vector_value = 0;
+					int max_left_lower_corner(0);
 					
-					// Start with comparison
-					T H_1, H_2, H_3;
-					
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-					
-					if (H_3 == H_adv_1)
+					for (int k = 0; k < target_normal.length; k++)
 					{
-						T b_vector_value = H_adv_1 - H_star_n;
+						VT& tn(target_normal[k]);
 
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c;
-
-						u_r = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i + 1, j) > -1)
+						T angle = 2*PI*k/n_y;
+												
+						if (angle > 3*PI/2 && angle < 2*PI)
 						{
-							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+							T compared_one = tn.x*dxp + tn.y*dyp - H_n[k];	
+							
+							if (b_vector_value <= compared_one)
+							{
+								b_vector_value = compared_one;
+								max_left_lower_corner = k;
+							}
 						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						else
+						{
+							continue;
+						}
 					}
-					else if (H_3 == H_adv_2)
+
+					b_vector[bc(i, j)] = b_vector_value;
+
+					T u_r, u_u, u_c;
+
+					u_r = target_normal[max_left_lower_corner].x*one_over_dx;
+					u_u = target_normal[max_left_lower_corner].y*one_over_dy;
+					u_c = -target_normal[max_left_lower_corner].x*one_over_dx - target_normal[max_left_lower_corner].y*one_over_dy;
+
+					if (bc(i + 1, j) > -1)
 					{
-						T b_vector_value = H_adv_2 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c, u_u;
-
-						u_r = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_u = -one_over_dx*(T)1/sqrt(2);
-
-						if (bc(i + 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-						}
-						if (bc(i, j + 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
 					}
-					else
+					if (bc(i, j + 1) > -1)
 					{
-						T b_vector_value = H_adv_3 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_c, u_u;
-
-						u_c = one_over_dx;
-						u_u = -one_over_dx;
-
-						if (bc(i, j + 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
 					}	
+			
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
 				else if (j == j_end)
 				{
 					// Define b_vector
 					T dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1));
 
-					T H_adv_1 = -dxp, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = dym;
-
-					// Start with comparison
-					T H_1, H_2, H_3;
-
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-
-					if (H_3 == H_adv_1)
+					T b_vector_value = 0;
+					int max_left_upper_corner(0);
+					
+					for (int k = 0; k < target_normal.length; k++)
 					{
-						T b_vector_value = H_adv_1 - H_star_n;
+						VT& tn(target_normal[k]);
 
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c;
-
-						u_r = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i + 1, j) > -1)
+						T angle = 2*PI*k/n_y;
+												
+						if (angle > 0 && angle < PI/2)
 						{
-							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
+							T compared_one = tn.x*dxp + tn.y*dym - H_n[k];	
+							
+							if (b_vector_value <= compared_one)
+							{
+								b_vector_value = compared_one;
+								max_left_upper_corner = k;
+							}
 						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						else
+						{
+							continue;
+						}
 					}
-					else if (H_3 == H_adv_2)
+
+					b_vector[bc(i, j)] = b_vector_value;
+
+					T u_r, u_d, u_c;
+
+					u_r = target_normal[max_left_upper_corner].x*one_over_dx;
+					u_d = -target_normal[max_left_upper_corner].y*one_over_dy;
+					u_c = -target_normal[max_left_upper_corner].x*one_over_dx + target_normal[max_left_upper_corner].y*one_over_dy;
+
+					if (bc(i + 1, j) > -1)
 					{
-						T b_vector_value = H_adv_2 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_r, u_c, u_d;
-
-						u_r = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_d = -one_over_dx*(T)1/sqrt(2);
-
-						if (bc(i + 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-						}
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
 					}
-					else
+					if (bc(i, j - 1) > -1)
 					{
-						T b_vector_value = H_adv_3 - H_star_n;
+						J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+					}	
 
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_c, u_d;
-
-						u_c = one_over_dx;
-						u_d = -one_over_dx;
-
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
 				else
 				{
@@ -630,7 +564,7 @@ public: // Member Function
 							continue;
 						}
 
-						T compared_one = tn.x*dxp + MAX(tn.y, 0)*dym + MIN(tn.y, 0)*dyp;
+						T compared_one = tn.x*dxp + MAX(tn.y, 0)*dym + MIN(tn.y, 0)*dyp - H_n[k];
 
 						if (b_vector_value <= compared_one)
 						{
@@ -693,82 +627,7 @@ public: // Member Function
 						
 						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 					}
-
-					//T H_adv_1 = -dxp, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = -(T)1/sqrt(2)*dxp - (T)1/sqrt(2)*dyp;
-					//
-					//T H_1, H_2, H_3;
-					//
-					//INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-					//
-					//if (H_3 == H_adv_1)
-					//{
-					//	T b_vector_value = H_adv_1 - H_star_n;
-
-					//	b_vector[bc(i, j)] = b_vector_value;
-
-					//	// Assign Jacobian
-					//	T u_r, u_c;
-
-					//	u_r = -one_over_dx;
-					//	u_c = one_over_dx;
-
-					//	if (bc(i + 1, j) > -1)
-					//	{
-					//		J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-					//	}
-
-					//	J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					//}
-					//else if (H_3 == H_adv_2)
-					//{
-					//	T b_vector_value = H_adv_2 - H_star_n;
-
-					//	b_vector[bc(i, j)] = b_vector_value;
-
-					//	// Assign Jacobian
-					//	T u_r, u_c, u_d;
-
-					//	u_r = -one_over_dx*(T)1/sqrt(2);
-					//	u_c = one_over_dx*(T)2/sqrt(2);
-					//	u_d = -one_over_dx*(T)1/sqrt(2);
-
-					//	if (bc(i + 1, j) > -1)
-					//	{
-					//		J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-					//	}
-					//	if (bc(i, j - 1) > -1)
-					//	{
-					//		J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-					//	}
-
-					//	J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					//}
-					//else
-					//{
-					//	T b_vector_value = H_adv_3 - H_star_n;
-
-					//	b_vector[bc(i, j)] = b_vector_value;
-
-					//	// Assign Jacobian
-					//	T u_r, u_c, u_u;
-
-					//	u_r = -one_over_dx*(T)1/sqrt(2);
-					//	u_c = one_over_dx*(T)2/sqrt(2);
-					//	u_u = -one_over_dx*(T)1/sqrt(2);
-
-					//	if (bc(i + 1, j) > -1)
-					//	{
-					//		J.AssignValue(bc(i, j), bc(i + 1, j), u_r, thread_id);
-					//	}
-					//	if (bc(i, j + 1) > -1)
-					//	{
-					//		J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-					//	}
-
-					//	J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					//}	
 				}
-				
 			}
 			else if (i == i_end)
 			{
@@ -777,193 +636,135 @@ public: // Member Function
 					// Define b_vector
 					T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
 
-					T H_adv_1 = dxm, H_adv_2 = (T)1/sqrt(2)*dxm - (T)1/sqrt(2)*dyp, H_adv_3 = -dyp;
-
-					// Start with comparison
-					T H_1, H_2, H_3;
-
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-
-					if (H_3 == H_adv_1)
+					T b_vector_value = 0;
+					int max_right_lower_corner(0);
+					
+					for (int k = 0; k < target_normal.length; k++)
 					{
-						T b_vector_value = H_adv_1 - H_star_n;
+						VT& tn(target_normal[k]);
 
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c;
-
-						u_l = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i - 1, j) > -1)
+						T angle = 2*PI*k/n_y;
+												
+						if (angle > PI && angle < 3*PI/2)
 						{
-							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+							T compared_one = tn.x*dxm + tn.y*dyp - H_n[k];	
+							
+							if (b_vector_value <= compared_one)
+							{
+								b_vector_value = compared_one;
+								max_right_lower_corner = k;
+							}
 						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						else
+						{
+							continue;
+						}
 					}
-					else if (H_3 == H_adv_2)
+
+					b_vector[bc(i, j)] = b_vector_value;
+
+					T u_l, u_u, u_c;
+
+					u_l = -target_normal[max_right_lower_corner].x*one_over_dx;
+					u_u = target_normal[max_right_lower_corner].y*one_over_dy;
+					u_c = target_normal[max_right_lower_corner].x*one_over_dx - target_normal[max_right_lower_corner].y*one_over_dy;
+
+					if (bc(i - 1, j) > -1)
 					{
-						T b_vector_value = H_adv_2 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c, u_u;
-
-						u_l = -one_over_dx*(T)1 / sqrt(2);
-						u_c = one_over_dx*(T)2 / sqrt(2);
-						u_u = -one_over_dx*(T)1 / sqrt(2);
-
-						if (bc(i - 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-						}
-						if (bc(i, j + 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
 					}
-					else
+					if (bc(i, j + 1) > -1)
 					{
-						T b_vector_value = H_adv_3 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_c, u_u;
-
-						u_c = one_over_dx;
-						u_u = -one_over_dx;
-
-						if (bc(i, j + 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}
+						J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
+					}	
+				
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
 				else if (j == j_end)
 				{
 					// Define b_vector
 					T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1));
 
-					T H_adv_1 = dxm, H_adv_2 = (T)1/sqrt(2)*dxm + (T)1/sqrt(2)*dym, H_adv_3 = dym;
-
-					// Start with comparison
-					T H_1, H_2, H_3;
-
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-
-					if (H_3 == H_adv_1)
+					T b_vector_value = 0;
+					int max_right_upper_corner(0);
+					
+					for (int k = 0; k < target_normal.length; k++)
 					{
-						T b_vector_value = H_adv_1 - H_star_n;
+						VT& tn(target_normal[k]);
 
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c;
-
-						u_l = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i - 1, j) > -1)
+						T angle = 2*PI*k/n_y;
+												
+						if (angle > PI/2 && angle < PI)
 						{
-							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+							T compared_one = tn.x*dxm + tn.y*dym - H_n[k];	
+							
+							if (b_vector_value <= compared_one)
+							{
+								b_vector_value = compared_one;
+								max_right_upper_corner = k;
+							}
 						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						else
+						{
+							continue;
+						}
 					}
-					else if (H_3 == H_adv_2)
+
+					b_vector[bc(i, j)] = b_vector_value;
+
+					T u_l, u_d, u_c;
+
+					u_l = -target_normal[max_right_upper_corner].x*one_over_dx;
+					u_d = -target_normal[max_right_upper_corner].y*one_over_dy;
+					u_c = target_normal[max_right_upper_corner].x*one_over_dx + target_normal[max_right_upper_corner].y*one_over_dy;
+
+					if (bc(i - 1, j) > -1)
 					{
-						T b_vector_value = H_adv_2 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c, u_d;
-
-						u_l = -one_over_dx*(T)1 / sqrt(2);
-						u_c = one_over_dx*(T)2 / sqrt(2);
-						u_d = -one_over_dx*(T)1 / sqrt(2);
-
-						if (bc(i - 1, j) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-						}
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
 					}
-					else
+					if (bc(i, j - 1) > -1)
 					{
-						T b_vector_value = H_adv_3 - H_star_n;
-
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_c, u_d;
-
-						u_c = one_over_dx;
-						u_d = -one_over_dx;
-
-						if (bc(i, j - 1) > -1)
-						{
-							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
-						}
-
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}
+						J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
+					}	
+				
+					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
 				else
 				{
 					// Define b_vector
 					T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
 
-					T H_adv_1 = dxm, H_adv_2 = (T)1/sqrt(2)*dxm + (T)1/sqrt(2)*dym, H_adv_3 = (T)1/sqrt(2)*dxm - (T)1/sqrt(2)*dyp;
-					
-					T H_1, H_2, H_3;
-					
-					INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-					
-					if (H_3 == H_adv_1)
+					T b_vector_value = 0;
+					for (int k = 0; k < target_normal.length; k++)
 					{
-						T b_vector_value = H_adv_1 - H_star_n;
+						VT n_x(1, 0);
+						VT& tn(target_normal[k]);
 
-						b_vector[bc(i, j)] = b_vector_value;
+						T dot = DotProduct(n_x, tn);
 
-						// Assign Jacobian
-						T u_l, u_c;
-
-						u_l = -one_over_dx;
-						u_c = one_over_dx;
-
-						if (bc(i - 1, j) > -1)
+						if (dot <= 0)
 						{
-							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+							continue;
 						}
 
-						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+						T compared_one = tn.x*dxm + MAX(tn.y, 0)*dym + MIN(tn.y, 0)*dyp - H_n[k];
+
+						if (b_vector_value <= compared_one)
+						{
+							b_vector_value = compared_one;
+							max_right = k;
+						}
 					}
-					else if (H_3 == H_adv_2)
+
+					b_vector[bc(i, j)] = b_vector_value;
+
+					if (target_normal[max_right].y > 0)
 					{
-						T b_vector_value = H_adv_2 - H_star_n;
+						T u_l, u_d, u_c;
 
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c, u_d;
-
-						u_l = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_d = -one_over_dx*(T)1/sqrt(2);
+						u_l = -target_normal[max_right].x*one_over_dx;
+						u_d = -target_normal[max_right].y*one_over_dy;
+						u_c = target_normal[max_right].x*one_over_dx + target_normal[max_right].y*one_over_dy;
 
 						if (bc(i - 1, j) > -1)
 						{
@@ -973,21 +774,16 @@ public: // Member Function
 						{
 							J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
 						}
-
+						
 						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 					}
-					else
+					else if (target_normal[max_right].y < 0)
 					{
-						T b_vector_value = H_adv_3 - H_star_n;
+						T u_l, u_u, u_c;
 
-						b_vector[bc(i, j)] = b_vector_value;
-
-						// Assign Jacobian
-						T u_l, u_c, u_u;
-
-						u_l = -one_over_dx*(T)1/sqrt(2);
-						u_c = one_over_dx*(T)2/sqrt(2);
-						u_u = -one_over_dx*(T)1/sqrt(2);
+						u_l = -target_normal[max_right].x*one_over_dx;
+						u_u = target_normal[max_right].y*one_over_dy;
+						u_c = target_normal[max_right].x*one_over_dx - target_normal[max_right].y*one_over_dy;
 
 						if (bc(i - 1, j) > -1)
 						{
@@ -999,7 +795,21 @@ public: // Member Function
 						}
 
 						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
-					}	
+					}
+					else
+					{
+						T u_l, u_c;
+
+						u_l = -target_normal[max_right].x*one_over_dx;
+						u_c = target_normal[max_right].x*one_over_dx;
+
+						if (bc(i - 1, j) > -1)
+						{
+							J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+						}
+						
+						J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
+					}
 				}
 			}
 			else if (j == j_start)
@@ -1007,43 +817,56 @@ public: // Member Function
 				// Define b_vector
 				T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dyp = one_over_dy*(u(i, j + 1) - u(i, j));
 
-				T H_adv_1 = -dyp, H_adv_2 = -(T)1/sqrt(2)*dxp - (T)1/sqrt(2)*dyp, H_adv_3 = (T)1/sqrt(2)*dxm - (T)1/sqrt(2)*dyp;
-					
-				T H_1, H_2, H_3;
-					
-				INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-					
-				if (H_3 == H_adv_1)
+				T b_vector_value = 0;
+				for (int k = 0; k < target_normal.length; k++)
 				{
-					T b_vector_value = H_adv_1 - H_star_n;
+					VT n_y(0, -1);
+					VT& tn(target_normal[k]);
 
-					b_vector[bc(i, j)] = b_vector_value;
+					T dot = DotProduct(n_y, tn);
 
-					// Assign Jacobian
-					T u_u, u_c;
+					if (dot <= 0)
+					{
+						continue;
+					}
 
-					u_u = -one_over_dx;
-					u_c = one_over_dx;
+					T compared_one = MAX(tn.x, 0)*dxm + MIN(tn.x, 0)*dxp + tn.y*dyp - H_n[k];
 
+					if (b_vector_value <= compared_one)
+					{
+						b_vector_value = compared_one;
+						max_lower = k;
+					}
+				}
+
+				b_vector[bc(i, j)] = b_vector_value;
+
+				if (target_normal[max_lower].x > 0)
+				{
+					T u_l, u_u, u_c;
+
+					u_l = -target_normal[max_lower].x*one_over_dx;
+					u_u = target_normal[max_lower].y*one_over_dy;
+					u_c = target_normal[max_lower].x*one_over_dx - target_normal[max_lower].y*one_over_dy;
+
+					if (bc(i - 1, j) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+					}
 					if (bc(i, j + 1) > -1)
 					{
 						J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
 					}
-
+						
 					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
-				else if (H_3 == H_adv_2)
+				else if (target_normal[max_lower].x < 0)
 				{
-					T b_vector_value = H_adv_2 - H_star_n;
+					T u_r, u_u, u_c;
 
-					b_vector[bc(i, j)] = b_vector_value;
-
-					// Assign Jacobian
-					T u_r, u_c, u_u;
-
-					u_r = -one_over_dx*(T)1/sqrt(2);
-					u_c = one_over_dx*(T)2/sqrt(2);
-					u_u = -one_over_dx*(T)1/sqrt(2);
+					u_r = target_normal[max_lower].x*one_over_dx;
+					u_u = target_normal[max_lower].y*one_over_dy;
+					u_c = -target_normal[max_lower].x*one_over_dx - target_normal[max_lower].y*one_over_dy;
 
 					if (bc(i + 1, j) > -1)
 					{
@@ -1058,26 +881,16 @@ public: // Member Function
 				}
 				else
 				{
-					T b_vector_value = H_adv_3 - H_star_n;
+					T u_u, u_c;
 
-					b_vector[bc(i, j)] = b_vector_value;
+					u_u = target_normal[max_lower].y*one_over_dy;
+					u_c = -target_normal[max_lower].y*one_over_dy;
 
-					// Assign Jacobian
-					T u_l, u_c, u_u;
-
-					u_l = -one_over_dx*(T)1/sqrt(2);
-					u_c = one_over_dx*(T)2/sqrt(2);
-					u_u = -one_over_dx*(T)1/sqrt(2);
-
-					if (bc(i - 1, j) > -1)
-					{
-						J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-					}
 					if (bc(i, j + 1) > -1)
 					{
 						J.AssignValue(bc(i, j), bc(i, j + 1), u_u, thread_id);
 					}
-
+						
 					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
 			}
@@ -1087,43 +900,56 @@ public: // Member Function
 				// Define b_vector
 				T dxm = one_over_dx*(u(i, j) - u(i - 1, j)), dxp = one_over_dx*(u(i + 1, j) - u(i, j)), dym = one_over_dy*(u(i, j) - u(i, j - 1));
 
-				T H_adv_1 = dym, H_adv_2 = -(T)1/sqrt(2)*dxp + (T)1/sqrt(2)*dym, H_adv_3 = (T)1/sqrt(2)*dxm + (T)1/sqrt(2)*dym;
-					
-				T H_1, H_2, H_3;
-					
-				INCREASING_SORT3(H_adv_1, H_adv_2, H_adv_3, H_1, H_2, H_3);
-					
-				if (H_3 == H_adv_1)
+				T b_vector_value = 0;
+				for (int k = 0; k < target_normal.length; k++)
 				{
-					T b_vector_value = H_adv_1 - H_star_n;
+					VT n_y(0, 1);
+					VT& tn(target_normal[k]);
 
-					b_vector[bc(i, j)] = b_vector_value;
+					T dot = DotProduct(n_y, tn);
 
-					// Assign Jacobian
-					T u_d, u_c;
+					if (dot <= 0)
+					{
+						continue;
+					}
 
-					u_d = -one_over_dx;
-					u_c = one_over_dx;
+					T compared_one = MAX(tn.x, 0)*dxm + MIN(tn.x, 0)*dxp + tn.y*dym - H_n[k];
 
+					if (b_vector_value <= compared_one)
+					{
+						b_vector_value = compared_one;
+						max_upper = k;
+					}
+				}
+
+				b_vector[bc(i, j)] = b_vector_value;
+
+				if (target_normal[max_upper].x > 0)
+				{
+					T u_l, u_d, u_c;
+
+					u_l = -target_normal[max_upper].x*one_over_dx;
+					u_d = -target_normal[max_upper].y*one_over_dy;
+					u_c = target_normal[max_upper].x*one_over_dx + target_normal[max_upper].y*one_over_dy;
+
+					if (bc(i - 1, j) > -1)
+					{
+						J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
+					}
 					if (bc(i, j - 1) > -1)
 					{
 						J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
 					}
-
+						
 					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
-				else if (H_3 == H_adv_2)
+				else if (target_normal[max_upper].x < 0)
 				{
-					T b_vector_value = H_adv_2 - H_star_n;
+					T u_r, u_d, u_c;
 
-					b_vector[bc(i, j)] = b_vector_value;
-
-					// Assign Jacobian
-					T u_r, u_c, u_d;
-
-					u_r = -one_over_dx*(T)1/sqrt(2);
-					u_c = one_over_dx*(T)2/sqrt(2);
-					u_d = -one_over_dx*(T)1/sqrt(2);
+					u_r = target_normal[max_upper].x*one_over_dx;
+					u_d = -target_normal[max_upper].y*one_over_dy;
+					u_c = -target_normal[max_upper].x*one_over_dx + target_normal[max_upper].y*one_over_dy;
 
 					if (bc(i + 1, j) > -1)
 					{
@@ -1138,26 +964,16 @@ public: // Member Function
 				}
 				else
 				{
-					T b_vector_value = H_adv_3 - H_star_n;
+					T u_d, u_c;
 
-					b_vector[bc(i, j)] = b_vector_value;
+					u_d = -target_normal[max_upper].y*one_over_dy;
+					u_c = target_normal[max_upper].y*one_over_dy;
 
-					// Assign Jacobian
-					T u_l, u_c, u_d;
-
-					u_l = -one_over_dx*(T)1/sqrt(2);
-					u_c = one_over_dx*(T)2/sqrt(2);
-					u_d = -one_over_dx*(T)1/sqrt(2);
-
-					if (bc(i - 1, j) > -1)
-					{
-						J.AssignValue(bc(i, j), bc(i - 1, j), u_l, thread_id);
-					}
 					if (bc(i, j - 1) > -1)
 					{
 						J.AssignValue(bc(i, j), bc(i, j - 1), u_d, thread_id);
 					}
-
+						
 					J.AssignValue(bc(i, j), bc(i, j), u_c, thread_id);
 				}
 			}
@@ -2047,6 +1863,8 @@ public: // Member Function
 			}
 			END_HEAD_THREAD_WORK;
 
+			SetupDensity(thread_id);
+			
 			CalculateJacobian(J, b_vector, thread_id);
 			
 			ofstream fout;
@@ -2315,6 +2133,91 @@ public: // Member Function
 			}
 			END_GRID_ITERATION_2D;
 		}
+		
+		if (test_number == 2)
+		{
+			MATRIX_2X2 M_x(0.8, 0, 0, 0.4), M_y(0.6, 0.2, 0.2, 0.8), J(0, 1, -1, 0);
+
+			MATRIX_2X2 nu, deno;
+
+			nu = M_x.Inversed()*M_y.Inversed()*J;
+			deno = M_x.Inversed()*M_y.Inversed();
+			
+			T atheta = nu.Trace()/deno.Trace();
+
+			MATRIX_2X2 R_theta(cos(atan(atheta)), sin(atan(atheta)), -sin(atan(atheta)), cos(atan(atheta)));
+
+			MATRIX_2X2 Ellipse_Mapping;
+
+			Ellipse_Mapping = M_y*R_theta*M_x.Inversed();
+
+			BEGIN_GRID_ITERATION_2D(density_x.partial_grids[thread_id])
+			{
+				density_x(i, j) = Ellipse_Mapping.x[0]*Ellipse_Mapping.x[3] - POW2(Ellipse_Mapping.x[2]);
+			}
+			END_GRID_ITERATION_2D;
+
+			BEGIN_GRID_ITERATION_2D(density_y.partial_grids[thread_id])
+			{
+				density_y(i, j) = (T)1;
+			}
+			END_GRID_ITERATION_2D;
+
+			// True solution
+			BEGIN_GRID_ITERATION_2D(true_solution.partial_grids[thread_id])
+			{
+				T x_coor = true_solution.grid.x_min + i*true_solution.grid.dx, y_coor = true_solution.grid.y_min + j*true_solution.grid.dy;
+				
+				true_solution(i, j).x = Ellipse_Mapping.x[0]*x_coor + Ellipse_Mapping.x[1]*y_coor;
+				true_solution(i, j).y = Ellipse_Mapping.x[2]*x_coor + Ellipse_Mapping.x[3]*y_coor;
+			}
+			END_GRID_ITERATION_2D;
+		}
+
+		// Prins's thesis - Example 7.4.1
+		if (test_number == 8)
+		{
+			T a = cos(5*PI/8), b = cos(3*PI/8);
+
+			T deno_1 = POW2((1 + b)/(1 - b)) + 1, deno_2 = POW2((1 + a)/(1 - a)) + 1;
+
+			T G_0 = (T)1/(4*PI*(-(T)1/deno_1 + (T)1/deno_2));
+
+			BEGIN_GRID_ITERATION_2D(density_x.partial_grids[thread_id])
+			{
+				density_x(i, j) = (T)1;
+			}
+			END_GRID_ITERATION_2D;
+
+			BEGIN_GRID_ITERATION_2D(density_y.partial_grids[thread_id])
+			{
+				T p_coor, q_coor;
+				
+				if (i == i_start)
+				{
+					p_coor = (u(i + 1, j) - u(i, j))*density_y.one_over_dx;
+				}
+				else if (i == i_end)
+				{
+					p_coor = (u(i, j) - u(i - 1, j))*density_y.one_over_dx;
+				}
+				else if (j == j_start)
+				{
+					q_coor = (u(i, j + 1) - u(i, j))*density_y.one_over_dy;
+				}
+				else if (j == j_end)
+				{
+					q_coor = (u(i, j) - u(i, j - 1))*density_y.one_over_dy;
+				}
+				else
+				{
+					p_coor = (u(i + 1, j) - u(i - 1, j))*density_y.one_over_2dx, q_coor = (u(i, j + 1) - u(i, j - 1))*density_y.one_over_2dy;
+				}
+				
+				density_y(i, j) = 4*G_0/POW2(POW2(p_coor) + POW2(q_coor) + 1);
+			}
+			END_GRID_ITERATION_2D;
+		}
 	}
 
 	void SetupInitialForNewtonMethod(const int& thread_id)
@@ -2392,14 +2295,37 @@ public: // Member Function
 
 	void ComputeGradient(void)
 	{
-		for (int i = u.grid.i_start; i <= u.grid.i_end; i++)
-		{
-			for (int j = u.grid.j_start; j <= u.grid.j_end; j++)
-			{
-				VT& grad(grad_u(i, j));
+		// Speedup variables
+		int i_start(u.grid.i_start), i_end(u.grid.i_end), j_start(u.grid.j_start), j_end(u.grid.j_end);
 
-				T grad_x = (u(i + 1, j) - u(i - 1, j))*u.grid.one_over_2dx, grad_y = (u(i, j + 1) - u(i, j - 1))*u.grid.one_over_2dy;
-			
+		for (int i = i_start; i <= i_end; i++)
+		{
+			for (int j = j_start; j <= j_end; j++)
+			{
+				VT &grad(grad_u(i, j));
+
+				T grad_x, grad_y;
+				if (i == i_start)
+				{
+					grad_x = (u(i + 1, j) - u(i, j))*u.grid.one_over_dx;
+				}
+				else if (i == i_end)
+				{
+					grad_x = (u(i, j) - u(i - 1, j))*u.grid.one_over_dx;
+				}
+				else if (j == j_start)
+				{
+					grad_y = (u(i, j + 1) - u(i, j))*u.grid.one_over_dy;
+				}
+				else if (j == j_end)
+				{
+					grad_y = (u(i, j) - u(i, j - 1))*u.grid.one_over_dy;
+				}
+				else
+				{
+					grad_x = (u(i + 1, j) - u(i - 1, j))*u.grid.one_over_2dx, grad_y = (u(i, j + 1) - u(i, j - 1))*u.grid.one_over_2dy;
+				}
+								
 				grad.x = grad_x;
 				grad.y = grad_y;
 			}
