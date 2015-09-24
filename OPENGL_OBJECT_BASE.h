@@ -36,7 +36,7 @@ public: // Essential Data
 	bool				is_velocity_x;
 	bool				is_velocity_y;
 	bool				is_scalar;
-
+	
 public: // Constructor and Destructor
 	OPENGL_OBJECT_BASE(const char* display_name, OPENGL_DRIVER* driver_input)
 		: id(GenerateID()), name(display_name), draw_type(0), position(0.0, 0.0, 0.0), rotation(0.0, 0.0, 0.0, 0.0), scale(1.0, 1.0, 1.0), driver(driver_input), is_levelset(false), is_velocity(false), is_scalar(false)
@@ -53,6 +53,11 @@ public: // Member Functions
 
 		ACTION_LEFT,
 		ACTION_RIGHT,
+        
+        MOVE_UPWARD,
+        MOVE_DOWNWARD,
+        MOVE_LEFT,
+        MOVE_RIGHT,
 	};
 
 	static int GenerateID()

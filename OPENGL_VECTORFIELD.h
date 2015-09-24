@@ -39,10 +39,11 @@ public: // Essential Data
 	int								name_base;
 
 	float							length_scale;
+    float                           x_offset, y_offset;
 
 public: // Constructor and Destructor
 	OPENGL_VECTORFIELD(const char* display_name, OPENGL_DRIVER* driver, FIELD_STRUCTURE_2D<VT>* vector_field_input)
-		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_mac(0), vector_field_x(0), vector_field_y(0), grid(vector_field_input->grid), length_scale(1.0)
+		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_mac(0), vector_field_x(0), vector_field_y(0), grid(vector_field_input->grid), length_scale(1.0), x_offset(0), y_offset(0)
 	{
 		count_object_for_name++;
 		name_base = count_object_for_name*NAME_BASE;
@@ -72,7 +73,7 @@ public: // Constructor and Destructor
 	}
 
 	OPENGL_VECTORFIELD(const char* display_name, OPENGL_DRIVER* driver, FIELD_STRUCTURE_2D<VT>* vector_field_input, FIELD_STRUCTURE_2D<T>* vector_field_mac_input)
-		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_mac(vector_field_mac_input), vector_field_x(0), vector_field_y(0), length_scale(1.0), grid(vector_field->grid)
+		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_mac(vector_field_mac_input), vector_field_x(0), vector_field_y(0), length_scale(1.0), grid(vector_field->grid), x_offset(0), y_offset(0)
 	{
 		count_object_for_name++;
 		name_base = count_object_for_name*NAME_BASE;
@@ -122,7 +123,7 @@ public: // Constructor and Destructor
 	}
 
 	OPENGL_VECTORFIELD(const char* display_name, OPENGL_DRIVER* driver, FIELD_STRUCTURE_2D<VT>* vector_field_input, FIELD_STRUCTURE_2D<T>* vector_field_x_input, FIELD_STRUCTURE_2D<T>* vector_field_y_input)
-		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_mac(0), vector_field_x(vector_field_x_input), vector_field_y(vector_field_y_input), length_scale(1.0), grid(vector_field->grid)
+		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_mac(0), vector_field_x(vector_field_x_input), vector_field_y(vector_field_y_input), length_scale(1.0), grid(vector_field->grid), x_offset(0), y_offset(0)
 	{
 		count_object_for_name++;
 		name_base = count_object_for_name*NAME_BASE;
@@ -330,19 +331,24 @@ public: // Initialization Function
 		int i, j;
 		int count_cell = 0;
 		int name_cell = -1;
-
-		LOOPS_2D(i, j, min[FIELD_X], min[FIELD_Y], max[FIELD_X], max[FIELD_Y])
+        
+		glTranslatef(x_offset, y_offset, 0.0f);
+        LOOPS_2D(i, j, min[FIELD_X], min[FIELD_Y], max[FIELD_X], max[FIELD_Y])
 		{
 			VT& vec = VT(vector_field->array_for_this(i, j).x, vector_field->array_for_this(i, j).y);
 			
 			name_cell = name_base + count_cell;
 
+            
+			if (vector_field->draw_for_this(i, j) == true)
+			{
+				
+				glBegin(GL_POINTS);
+					//glVertex3f(ces.x, ces.y, 1.0f);
+					glVertex3f(vec.x, vec.y, 0.0f);
+				glEnd();
+			}
 			
-			glBegin(GL_POINTS);
-				//glVertex3f(ces.x, ces.y, 1.0f);
-				glVertex3f(vec.x, vec.y, 0.0f);
-			glEnd();
-
 			count_cell++;
 		}
 	}
@@ -417,6 +423,54 @@ public: // Initialization Function
 
 		index[field] += 1;
 		index[field] = CLAMP(index[field], min[field], max[field]);
+	}
+
+    void MoveUpward()
+	{
+        if (GetDrawType() == VECTORFIELD_HIDE)
+		{
+			return;
+		}
+
+		y_offset += 0.1f;
+
+		cout << "Move Upward = " << y_offset << endl;
+	}
+
+    void MoveDownward()
+	{
+	    if (GetDrawType() == VECTORFIELD_HIDE)
+		{
+			return;
+		}
+
+		y_offset -= 0.1f;
+
+		cout << "Move Downward = " << y_offset << endl;
+	}
+
+    void MoveLeft()
+	{
+	    if (GetDrawType() == VECTORFIELD_HIDE)
+		{
+			return;
+		}
+
+		x_offset -= 0.1f;
+
+		cout << "Move Left = " << x_offset << endl;
+	}
+
+    void MoveRight()
+	{
+	    if (GetDrawType() == VECTORFIELD_HIDE)
+		{
+			return;
+		}
+
+		x_offset += 0.1f;
+
+		cout << "Move Right = " << x_offset << endl;
 	}
 
 public: // Virtual Functions
@@ -512,6 +566,18 @@ public: // Virtual Functions
 		case OPENGL_OBJECT_BASE::ACTION_RIGHT:
 			RightValue();
 			break;
+		case OPENGL_OBJECT_BASE::MOVE_UPWARD:
+            MoveUpward();
+            break;
+        case OPENGL_OBJECT_BASE::MOVE_DOWNWARD:
+            MoveDownward();
+            break;
+        case OPENGL_OBJECT_BASE::MOVE_LEFT:
+            MoveLeft();
+            break;
+        case OPENGL_OBJECT_BASE::MOVE_RIGHT:
+            MoveRight();
+            break;
 		}
 	}
 };

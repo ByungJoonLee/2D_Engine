@@ -188,9 +188,9 @@ SIMULATION_WORLD
 				resolution_scale = 1
 
 				start_indices = (0,0)
-				base_grid_resolution = (65, 65)
-				base_grid_min = ( -0.5, -0.5)
-				base_grid_max = (  0.5,  0.5)
+				base_grid_resolution = (33, 33)
+				base_grid_min = (-0.5, -0.5)
+				base_grid_max = ( 0.5,  0.5)
 			}
 			
 			padding_width = 2
@@ -240,9 +240,11 @@ SIGNAL_PROCESSING_TEST
 
 MONGE_AMPERE_EQUATION_TEST
 {
-	tolerance = 0.000001
+	tolerance = 0.0000001
 	max_iteration_for_sub_linear_solver = 100000
-	max_iteration_for_Newton_Method = 20
+	max_iteration_for_Newton_Method = 5
+			
+	is_regularized = false
 	
 	// Damping parameter
 	alpha = 1

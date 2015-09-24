@@ -13,7 +13,10 @@ public: // Essential Data
 	ARRAY<T>					x;
     ARRAY<T>					A;
 	ARRAY<T>					tau, best;
-
+	ARRAY<Tcomp>				discrete_fourier;
+	ARRAY<Tcomp>				signal_of_first_frequency;
+	ARRAY<Tcomp>				signal_of_second_frequency;
+	
 	int							Nsamps;
 	int							Ncoef;
     
@@ -24,11 +27,16 @@ public: // Essential Data
 
 	T							min_f, max_f;
 
+	// Highest Frequencies
+	T							f_1, f_2, f_3;
+
 	// For drawing
 	GRID_STRUCTURE_1D			base_grid;
+	FIELD_STRUCTURE_1D<T>		original_signal;
 	FIELD_STRUCTURE_1D<T>		power_spectral_density; 
-
-
+	FIELD_STRUCTURE_1D<T>		signal_corresponding_to_first_peak;
+	FIELD_STRUCTURE_1D<T>		signal_corresponding_to_second_peak;
+	
 public: // Constructor and Destructor
     MAXIMUM_ENTROPY_ANALYSIS(void)
 	{}
@@ -53,7 +61,7 @@ public: // Initialization Function
 			istringstream iss(line);
 
 			int i;
-			T a(0);
+			T a;
 			
 			x[i] = a;
 			
@@ -66,9 +74,23 @@ public: // Initialization Function
 		A.Initialize(Ncoef);
 		best.Initialize(Ncoef);
         tau.Initialize(nihr);
-
+		discrete_fourier.Initialize(Nsamps);
+		signal_of_first_frequency.Initialize(Nsamps);
+		signal_of_second_frequency.Initialize(Nsamps);
+		
+		GRID_STRUCTURE_1D grid_for_original_signal;
+		grid_for_original_signal.Initialize(Nsamps, world_discretization->world_grid_1d.i_start, 0, 1);
 		//base_grid.Initialize(nihr, 0, min_f, max_f);
+		original_signal.Initialize(grid_for_original_signal);
 		power_spectral_density.Initialize(world_discretization->world_grid_1d);
+		signal_corresponding_to_first_peak.Initialize(grid_for_original_signal);
+		signal_corresponding_to_second_peak.Initialize(grid_for_original_signal);
+		
+		// For Drawing
+		for (int i = 0; i < original_signal.grid.i_res; i++)
+		{
+			original_signal[i] = x[i];
+		}
 
         //Detren(Nsamps);
         //Lopass(Nsamps);
@@ -87,6 +109,24 @@ public: // Member Function
 		}
 
         MESA(min_f, max_f, nihr, Ncoef, Power, bptu);
+		
+		DiscreteFourier();
+		
+		f_2 = 0.4184;
+
+		//signal_of_first_frequency = FrequencyCorrespondingSignal(f_1);
+		//signal_of_second_frequency = FrequencyCorrespondingSignal(f_2);
+		FrequencyCorrespondingSignal(f_1, signal_of_first_frequency);
+		FrequencyCorrespondingSignal(f_2, signal_of_second_frequency);
+		
+		for (int i = 0; i < signal_corresponding_to_first_peak.grid.i_res; i++)
+		{
+			signal_corresponding_to_first_peak[i] = signal_of_first_frequency[i].real();
+		}
+		for (int i = 0; i < signal_corresponding_to_second_peak.grid.i_res; i++)
+		{
+			signal_corresponding_to_second_peak[i] = signal_of_second_frequency[i].real();
+		}
 	}
 
 	void Coef(const ARRAY<T>& data, T& xms, ARRAY<T>& coef)
@@ -159,7 +199,7 @@ public: // Member Function
         
 		for (int i = 0; i < nihr; i++)
 		{
-            T freq = min_f + (i - 1)*(max_f - min_f)/(T)(nihr - 1);
+            T freq = min_f + i*(max_f - min_f)/(T)(nihr - 1);
             tau[i] = (T)1/freq;
             
 			T ream = 1;
@@ -178,9 +218,39 @@ public: // Member Function
 			
 			if (tau[i] < (T)0.1)
 			{
-                break;
+                cout << "Stop at " << i << "th iteration!" << endl;
+				break;
 			}
 		}
+
+		// For finding frequency which gives the first peak
+		int i_first(0);
+		T first_peak = power_spectral_density[0];
+
+		for (int i = 0; i < nihr; i++)
+		{
+			if (i == 0)
+			{
+				continue;
+			}
+
+			if (first_peak <= power_spectral_density[i])// && (power_spectral_density[i] < power_spectral_density[i + 1]) && (power_spectral_density[i] > power_spectral_density[i - 1]))
+			{
+				first_peak = power_spectral_density[i];
+				f_1 = min_f + i*(max_f - min_f)/(T)(nihr - 1);
+				i_first = i;
+			}
+		}
+		
+		//// For finding frequency which gives the second maximum peak
+		//for (int i = i_first + 1; i < nihr; i++)
+		//{
+		//	if ((power_spectral_density[i] < power_spectral_density[i + 1]) && (power_spectral_density[i] > power_spectral_density[i - 1]))
+		//	{
+		//		f_2 = min_f + i*(max_f - min_f)/(T)(nihr - 1);
+		//		break;
+		//	}
+		//}
 	}
 
     void Detren(const int& num_of_samps)
@@ -241,5 +311,114 @@ public: // Member Function
 		{
             x[i] = y[i];
 		}
+	}
+
+	void DiscreteFourier()
+	{
+		const T pi2 = (T)2*PI;
+		const Tcomp imaginary_number(0,1);
+		
+		for (int i = 0; i < Nsamps; i++)
+		{
+			Tcomp d_fourier;
+			d_fourier = 0;
+						
+			for (int k = 0; k < Nsamps; k++)
+			{
+				Tcomp omega = pi2*k*i*imaginary_number/(T)Nsamps;
+				Tcomp a;
+				a = exp(-omega);
+				d_fourier += x[k]*a;
+			}
+
+			discrete_fourier[i] = d_fourier;
+		}
+	}
+
+	ARRAY<Tcomp> InverseFourier()
+	{
+		ARRAY<Tcomp> Inverse_Fourier(Nsamps);
+		const T pi2 = (T)2*PI;
+		const Tcomp imaginary_number(0,1);
+		
+		T one_over_N = (T)1/Nsamps;
+		
+		for (int i = 0; i < Nsamps; i++)
+		{
+			Tcomp inverse_fourier;
+			inverse_fourier = 0;
+
+			for (int k = 0; k < Nsamps; k++)
+			{
+				Tcomp omega = pi2*i*k*imaginary_number/(T)Nsamps;
+				Tcomp a;
+				a = exp(omega);
+
+				inverse_fourier += discrete_fourier[k]*a;
+			} 
+
+			Inverse_Fourier[i] = one_over_N*inverse_fourier;
+		}
+		
+		return Inverse_Fourier;
+	}
+
+	ARRAY<Tcomp> FrequencyCorrespondingSignal(const T& designated_frq)
+	{
+		ARRAY<Tcomp> CorrespondingSignal(Nsamps);
+		const T pi2 = (T)2*PI;
+		const Tcomp imaginary_number(0,1);
+		
+		T one_over_N = (T)1/Nsamps;
+		
+		for (int k = 0; k < Nsamps; k++)
+		{
+			for (int i = 0; i < Nsamps; i++)
+			{
+				T freq_l = min_f + i*(max_f - min_f)/(T)(Nsamps - 1);
+				T freq_r = min_f + (i + 1)*(max_f - min_f)/(T)(Nsamps - 1);
+
+				if (designated_frq >= freq_l && designated_frq < freq_r)
+				{
+					Tcomp omega = pi2*k*i*imaginary_number/(T)Nsamps;
+					Tcomp a;
+					Tcomp b;
+					a = exp(omega);
+					b = exp(-omega);
+
+					CorrespondingSignal[k] = one_over_N*(discrete_fourier[i]*a + discrete_fourier[Nsamps - i]*b);
+				} 
+			}
+		} 
+					
+		return CorrespondingSignal;
+	}
+
+	void FrequencyCorrespondingSignal(const T& designated_frq, ARRAY<Tcomp>& designated_signal)
+	{
+		const T pi2 = (T)2*PI;
+		const Tcomp imaginary_number(0,1);
+		
+		T one_over_N = (T)1/Nsamps;
+		
+		for (int k = 0; k < Nsamps; k++)
+		{
+			for (int i = 0; i < Nsamps; i++)
+			{
+				T freq_l = min_f + i*(max_f - min_f)/(T)(Nsamps - 1);
+				T freq_r = min_f + (i + 1)*(max_f - min_f)/(T)(Nsamps - 1);
+
+				if (designated_frq >= freq_l && designated_frq < freq_r)
+				{
+					Tcomp omega = pi2*k*i*imaginary_number/(T)Nsamps;
+					Tcomp a;
+					Tcomp b;
+					a = exp(omega);
+					b = exp(-omega);
+
+					designated_signal[k] = one_over_N*(discrete_fourier[i]*a + discrete_fourier[Nsamps - i]*b);
+				} 
+			}
+		} 
 	}
 };

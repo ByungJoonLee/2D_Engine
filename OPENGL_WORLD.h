@@ -64,12 +64,21 @@ public: // Essential Data
 	vector<OPENGL_SOLVER_BASE*>		all_solvers;
 
 	OPENGL_EULERIAN_FLUID_SOLVER*	opengl_fluid_solver;
+	
 	OPENGL_LEVELSET*				opengl_levelset_for_numerical_integration;
+	
 	OPENGL_LEVELSET*				opengl_levelset_for_poisson_equation_test;
 	OPENGL_SCALARFIELD*				opengl_solution_for_poisson_equation_test;
-	OPENGL_VECTORFIELD*				opengl_monge_ampere_test;
+	
+	OPENGL_VECTORFIELD*				opengl_gradient_map_for_monge_ampere_test;
+	OPENGL_VECTORFIELD*				opengl_true_solution_for_monge_ampere_test;
+	OPENGL_SCALARFIELD*				opengl_solution_for_monge_ampere_test;
+	
 	OPENGL_1D_GRAPH*				opengl_1d_graph_for_signal_processing;
-
+	OPENGL_1D_GRAPH*				opengl_1d_graph_for_original_signal;
+	OPENGL_1D_GRAPH*				opengl_1d_graph_for_signal_corresponding_to_first_peak;
+	OPENGL_1D_GRAPH*				opengl_1d_graph_for_signal_corresponding_to_second_peak;
+	
 	OPENGL_LIGHT_MANAGER*			light_manager;
 	OPENGL_SIMULATION_BOX*			gl_simulation_box;
 
@@ -251,18 +260,29 @@ public: // Initialization Function
 
 			if (simulation_world->signal_processing_test)
 			{
-				opengl_1d_graph_for_signal_processing = new OPENGL_1D_GRAPH("SIGNAL_GRAPH", driver, &simulation_world->maximum_entropy_analysis.power_spectral_density);
+				opengl_1d_graph_for_original_signal = new OPENGL_1D_GRAPH("ORIGINAL_SIGNAL", driver, &simulation_world->maximum_entropy_analysis.original_signal);
+				all_objects.push_back(opengl_1d_graph_for_original_signal);
+				opengl_1d_graph_for_signal_processing = new OPENGL_1D_GRAPH("POWER_SPECTRAL_DENSITY", driver, &simulation_world->maximum_entropy_analysis.power_spectral_density);
 				all_objects.push_back(opengl_1d_graph_for_signal_processing);
+				opengl_1d_graph_for_signal_corresponding_to_first_peak = new OPENGL_1D_GRAPH("SIGNAL_CORRESPOND_TO_FIRST_PEAK", driver, &simulation_world->maximum_entropy_analysis.signal_corresponding_to_first_peak);
+				all_objects.push_back(opengl_1d_graph_for_signal_corresponding_to_first_peak);
+				opengl_1d_graph_for_signal_corresponding_to_second_peak = new OPENGL_1D_GRAPH("SIGNAL_CORRESPOND_TO_SECOND_PEAK", driver, &simulation_world->maximum_entropy_analysis.signal_corresponding_to_second_peak);
+				all_objects.push_back(opengl_1d_graph_for_signal_corresponding_to_second_peak);
 				
 				test_1d = true;
 			}
 
 			if (simulation_world->monge_ampere_solver_test)
 			{
-				opengl_monge_ampere_test = new OPENGL_VECTORFIELD("GRADIENT_MAP", driver, &simulation_world->monge_ampere_solver.grad_u);
-				all_objects.push_back(opengl_monge_ampere_test);
+				opengl_gradient_map_for_monge_ampere_test = new OPENGL_VECTORFIELD("MONGE_AMPERE_GRADIENT_MAP", driver, &simulation_world->monge_ampere_solver.grad_u);
+				all_objects.push_back(opengl_gradient_map_for_monge_ampere_test);
+				opengl_true_solution_for_monge_ampere_test = new OPENGL_VECTORFIELD("MONGE_AMPERE_TRUE_SOLUTION", driver, &simulation_world->monge_ampere_solver.true_solution);
+				all_objects.push_back(opengl_true_solution_for_monge_ampere_test);
+				opengl_solution_for_monge_ampere_test = new OPENGL_SCALARFIELD("MONGE_AMPERE_SOLUTION", driver, &simulation_world->monge_ampere_solver.u);
+				all_objects.push_back(opengl_solution_for_monge_ampere_test);
 
-				opengl_monge_ampere_test->SetDrawType(OPENGL_VECTORFIELD::VECTORFIELD_DRAW_MAP);
+				opengl_gradient_map_for_monge_ampere_test->SetDrawType(OPENGL_VECTORFIELD::VECTORFIELD_DRAW_MAP);
+				opengl_true_solution_for_monge_ampere_test->SetDrawType(OPENGL_VECTORFIELD::VECTORFIELD_DRAW_MAP);
 
 				test_1d = false;
 			}
@@ -342,18 +362,28 @@ public: // Member Functions
 
 			float half_x = (base_grid.x_max - base_grid.x_min)/2.0f;
 			
-			glMatrixMode(GL_MODELVIEW);
-			glPushMatrix();
-				driver->SetDefaultRenderStatesLineMode();	
-				driver->DrawWireBox1D(half_x, 1.1f);
-			glMatrixMode(GL_MODELVIEW);
-			glPopMatrix();
-						
+			if (draw_simulation_box)
+			{
+				glMatrixMode(GL_MODELVIEW);
+				glPushMatrix();
+					driver->SetDefaultRenderStatesLineMode();	
+					driver->DrawWireBox1D(half_x, 1.1f);
+				glMatrixMode(GL_MODELVIEW);
+				glPopMatrix();
+			}
+									
 			// Main Draw
+			int number(0);
 			for (vector<OPENGL_OBJECT_BASE*>::iterator it = all_objects.begin(); it != all_objects.end(); ++it)
 			{
 				glEnable(GL_BLEND);
 				glBlendFunc(GL_ONE, GL_ZERO);
+				if (number == selected_object_index)
+				{
+					(*it)->Draw();
+				}
+				number++;
+/*
 				if (draw_levelset)
 				{
 					if ((*it)->is_levelset)
@@ -369,7 +399,7 @@ public: // Member Functions
 					{
 						(*it)->Draw();
 					}
-				}
+				}*/
 			} 
 		}
 		else
@@ -424,9 +454,15 @@ public: // Member Functions
 			}
 
 			// Main Draw
+			int number(0);
 			for (vector<OPENGL_OBJECT_BASE*>::iterator it = all_objects.begin(); it != all_objects.end(); ++it)
 			{
-				glEnable(GL_BLEND);
+				if (number == selected_object_index)
+				{
+					(*it)->Draw();
+				}
+				number++;
+				/*glEnable(GL_BLEND);
 				glBlendFunc(GL_ONE, GL_ZERO);
 				if (draw_levelset)
 				{
@@ -467,7 +503,7 @@ public: // Member Functions
 					{
 						(*it)->Draw();
 					}
-				}
+				}*/
 			} 
 		}
 
@@ -610,6 +646,7 @@ public: // Member Functions
 			LoadOpenGLSettings();
 			break;
 		case '=':
+			break;
 		case '+': 
 			IncrementValue();
 			break;
@@ -617,13 +654,16 @@ public: // Member Functions
 			DecrementValue();
 			break;
 		case '[':
+			break;
 		case '/': 
 			LeftShiftValue();
 			break;
 		case ']':
+			break;
 		case '*':
 			RightShiftValue();
-		case '\'':
+			break;
+		case 'y':
 			draw_simulation_box = !draw_simulation_box;
 			break;
 		case ',':
@@ -672,10 +712,22 @@ public: // Member Functions
 		switch (key)
 		{
 		case GLUT_KEY_UP:
+			MoveUpward();
+			break;
 		case GLUT_KEY_DOWN:
+			MoveDownward();
+			break;
 		case GLUT_KEY_LEFT:
+			MoveLeft();
+			break;
 		case GLUT_KEY_RIGHT:
-			// ToggleMenu();
+			MoveRight();
+			break;
+		case GLUT_KEY_PAGE_UP:
+			SelectPrevObject();
+			break;
+		case GLUT_KEY_PAGE_DOWN:
+			SelectNextObject();
 			break;
 		}
 	}
@@ -790,6 +842,41 @@ public: // Member Functions
 		}
 	}
 
+	void MoveUpward()
+	{
+		OPENGL_OBJECT_BASE* selected_obj = all_objects[selected_object_index];
+		if (selected_obj)
+		{
+			selected_obj->UserAction(OPENGL_OBJECT_BASE::MOVE_UPWARD);
+		}
+	}
+	
+	void MoveDownward()
+	{
+		OPENGL_OBJECT_BASE* selected_obj = all_objects[selected_object_index];
+		if (selected_obj)
+		{
+			selected_obj->UserAction(OPENGL_OBJECT_BASE::MOVE_DOWNWARD);
+		}
+	}
+
+	void MoveLeft()
+	{
+		OPENGL_OBJECT_BASE* selected_obj = all_objects[selected_object_index];
+		if (selected_obj)
+		{
+			selected_obj->UserAction(OPENGL_OBJECT_BASE::MOVE_LEFT);
+		}
+	}
+
+	void MoveRight()
+	{
+		OPENGL_OBJECT_BASE* selected_obj = all_objects[selected_object_index];
+		if (selected_obj)
+		{
+			selected_obj->UserAction(OPENGL_OBJECT_BASE::MOVE_RIGHT);
+		}
+	}
 	void NextObject()
 	{
 		SelectNextDrawType();

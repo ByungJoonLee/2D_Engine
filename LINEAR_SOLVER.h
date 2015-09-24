@@ -11,12 +11,13 @@ public: // Essential Data
 	T					residual;							// Residual of previous solving
 	int					max_iteration;
 	int					num_iteration;						// Number of iterations of pervious solving
+    T                   omega;
 
 	MULTITHREADING*	    multithreading;
-
+    
 public: // Constructors and Destructor
 	LINEAR_SOLVER(void)
-		: tolerance((T)1), sqr_tolerance(tolerance*tolerance), residual((T)1e8), max_iteration(10), num_iteration(0), multithreading(0)
+		: tolerance((T)1), sqr_tolerance(tolerance*tolerance), residual((T)1e8), max_iteration(10), num_iteration(0), multithreading(0), omega(1)
 	{}
 
 	~LINEAR_SOLVER(void)

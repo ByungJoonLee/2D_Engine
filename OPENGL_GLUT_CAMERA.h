@@ -14,8 +14,8 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-#define SCALE_PAN_FACTOR		0.001f
-#define SCALE_ZOOM_FACTOR		0.0015f
+#define SCALE_PAN_FACTOR		0.002f
+#define SCALE_ZOOM_FACTOR		0.0020f
 #define SELECT_BUFFER_LENGTH	1024
 
 class OPENGL_GLUT_CAMERA
@@ -66,9 +66,9 @@ public: // Constructor and Destructor
 		, camera_num(0)
 	{
 		trackball.setDollyActivate(GLUT_LEFT_BUTTON, GLUT_ACTIVE_CTRL);
-		trackball.setPanActivate(GLUT_LEFT_BUTTON, GLUT_ACTIVE_SHIFT);
-		trackball.setTrackballActivate(GLUT_LEFT_BUTTON);
-
+		trackball.setPanActivate(GLUT_LEFT_BUTTON);
+		trackball.setTrackballActivate(GLUT_RIGHT_BUTTON);
+		
 		trackball.setTrackballScale(0.7f);
 		trackball.setDollyScale(scale_zoom);
 		trackball.setPanScale(scale_pan);
@@ -82,7 +82,7 @@ public: // Constructor and Destructor
 
 		camera_save_dir = GetApplicationDir();
 	}
-
+	
 	~OPENGL_GLUT_CAMERA(void)
 	{}
 
@@ -94,7 +94,7 @@ public: // Initialization Function
 
 		auto_camera_load = script_block.GetBoolean("auto_camera_load", false);
 		camera_num = script_block.GetInteger("camera_num", 0);
-
+		
 		SetCameraNum(camera_num);
 		CalcDollyPosition(grid);
 	}

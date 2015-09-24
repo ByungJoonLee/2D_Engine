@@ -1,6 +1,6 @@
 #pragma once
 
-enum  POISSON_SOLVER_TYPE                                   {NO_SOLVER, CG, PCG, GS, BICG};
+enum  POISSON_SOLVER_TYPE                                   {NO_SOLVER, CG, PCG, GS, BICG, SOR};
 
 #define PI													(T)3.141592
 #define BC_FULL												0

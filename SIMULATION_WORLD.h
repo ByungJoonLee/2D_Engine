@@ -42,7 +42,8 @@ public: // Options for Simulation
 	bool							air_water_simulation;
 	bool							oil_water_simulation;
 	bool							vortex_sheet_problem;
-	
+	bool							bifurcation_test;
+
 	// Numerical Test Options
 	bool							numerical_integration_test;
     bool                            BJ_model_test;
@@ -75,7 +76,7 @@ public: // Multithreading
 
 public: // Constructor and Destructor
 	SIMULATION_WORLD(void)
-		: multithreading(0), fluid_solver(false), numerical_test_solver(false), air_water_simulation(false), large_bubble(false), small_bubble(false), oil_water_simulation(false), numerical_integration_test(false), poisson_equation_with_jump_condition(false), is_vertical(false), is_parallel(false), num_current_frame(0), last_frame((int)1000000), dt((T)0), max_dt((T)0), test_number(0)
+		: multithreading(0), fluid_solver(false), numerical_test_solver(false), air_water_simulation(false), bifurcation_test(false), large_bubble(false), small_bubble(false), oil_water_simulation(false), numerical_integration_test(false), poisson_equation_with_jump_condition(false), is_vertical(false), is_parallel(false), num_current_frame(0), last_frame((int)1000000), dt((T)0), max_dt((T)0), test_number(0)
 	{}
 
 	~SIMULATION_WORLD(void)
@@ -110,6 +111,7 @@ public: // Initialization Functions
 			air_water_simulation = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").GetBoolean("air_water_simulation", false);
 			oil_water_simulation = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").GetBoolean("oil_water_simulation", false);
 			vortex_sheet_problem = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").GetBoolean("vortex_sheet_problem", false);
+			bifurcation_test	 = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").GetBoolean("bifurcation_test", false);
 		}
 		if (numerical_test_solver)
 		{
@@ -126,10 +128,6 @@ public: // Initialization Functions
 			{
 				test_number = script_block_for_this.FindBlock("NUMERICAL_TEST_OPTIONS").FindBlock("POISSON_EQUATION_WITH_JUMP_CONDITION_TEST_NUMBER").GetInteger("test_number", (int)1);
 			} // Test number 1~2 gives 1d example, and the others will be 2d
-			if (monge_ampere_solver_test)
-			{
-				test_number = script_block_for_this.FindBlock("NUMERICAL_TEST_OPTIONS").FindBlock("MONGE_AMPERE_EQUATION_TEST_NUMBER").GetInteger("test_number", (int)1);
-			}
 		}
 		
 		// Multithreading
@@ -158,7 +156,11 @@ public: // Initialization Functions
 			if (vortex_sheet_problem)
 			{
 				cout << "Vortex Sheet Problem is activated!" << endl;
-			} 
+			}
+			if (bifurcation_test)
+			{
+				cout << "Bifurcation Test is activated!" << endl;
+			}
 		}
 		if (numerical_test_solver)
 		{
@@ -184,7 +186,6 @@ public: // Initialization Functions
 			if (monge_ampere_solver_test)
 			{
 				cout << "Monge-Ampere Solver Test is activated!" << endl;
-				cout << "Test Number : #" << test_number << endl;
 			}
 		}
 
@@ -222,7 +223,11 @@ public: // Initialization Functions
 			if (vortex_sheet_problem)
 			{
 				world_discretization.Initialize(script_block_for_this.FindBlock("WORLD_DISCRETIZATION").FindBlock("VORTEX_SHEET_PROBLEM"));
-			} 
+			}
+			if (bifurcation_test)
+			{
+				world_discretization.Initialize(script_block_for_this.FindBlock("WORLD_DISCRETIZATION").FindBlock("BIFURCATION_TEST"));
+			}
 		}
 		if (numerical_test_solver)
 		{
@@ -335,7 +340,12 @@ public: // Initialization Functions
 			{
 				eulerian_solver.vortex_sheet_problem = vortex_sheet_problem;
 				eulerian_solver.InitializeFromScriptBlock(world_discretization.world_grid, script_reader.FindBlock("FLUID_SOLVER_UNIFORM").FindBlock("VORTEX_SHEET_PROBLEM"), multithreading);
-			} 
+			}
+			if (bifurcation_test)
+			{
+				eulerian_solver.bifurcation_test = bifurcation_test;
+				eulerian_solver.InitializeFromScriptBlock(world_discretization.world_grid, script_reader.FindBlock("FLUID_SOLVER_UNIFORM").FindBlock("BIFURCATION_TEST"), multithreading);
+			}
 		}
 		if (numerical_test_solver)
 		{
@@ -363,7 +373,6 @@ public: // Initialization Functions
 			}
 			if (monge_ampere_solver_test)
 			{
-				monge_ampere_solver.test_number = test_number;
 				monge_ampere_solver.InitializeFromBlock(script_reader.FindBlock("MONGE_AMPERE_EQUATION_TEST"), multithreading);
 			}
 		}

@@ -73,6 +73,8 @@ public: // Constructors and Destructor
 	OPENGL_1D_GRAPH(const char* display_name, OPENGL_DRIVER* driver, FIELD_STRUCTURE_1D<int>* scalar_field_i_input, FIELD_1D_COLOR_MODE color_mode_input = FIELD_1D_GREY_SCALE_MODE, COLOR_FUNCTION color_pf_input = 0)
 		: OPENGL_OBJECT_BASE(display_name, driver), scalar_field_i(scalar_field_i_input), mode(FLOAT_MODE), grid(scalar_field_f->grid), color_mode(color_mode_input), color_pf(color_pf_input)
 	{
+		
+
 		Initialize();
 	}
 
@@ -139,19 +141,11 @@ public: // Initialization Function
 				scalar = scalar_field_i->array_for_this(i);
 			}
 
-			//SetColor(scalar);
-
-			/*if (draw_with_name)
-			{
-				glPushName(name_base + count_cell);
-			}*/
-
 			GLfloat x_coor = scalar_field_f->x_min + i*scalar_field_f->dx;
 			// Translation for drawing
 			GLfloat x_cen = (scalar_field_f->x_min + (scalar_field_f->x_min + scalar_field_f->i_end*scalar_field_f->dx))/(T)2;
 
 			glBegin(GL_POINTS);
-				//glVertex3f(ces.x, ces.y, 1.0f);
 				glVertex3f(x_coor - x_cen, scalar/max_s - 0.5f, 0.0f);
 			glEnd();
 			

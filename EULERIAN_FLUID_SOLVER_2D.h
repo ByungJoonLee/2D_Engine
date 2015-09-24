@@ -57,6 +57,7 @@ public: // Simulation Options
 	bool							air_water_simulation;
 	bool							oil_water_simulation;
 	bool							vortex_sheet_problem;
+	bool							bifurcation_test;
 	bool							dimensionless_form;
 	bool							is_vertical, is_parallel;
 
@@ -126,7 +127,7 @@ public: // Option for Time Marching
 public: // Constructor and Destructor
 	EULERIAN_FLUID_SOLVER_2D(void)
 		: advecting_field_variables(0), water_projection(0), water_levelset(0), viscosity_solver(0), vortex_levelset(0), water_velocity_field(0), water_velocity_field_mac_x(0), water_velocity_field_mac_y(0),
-		air_water_simulation(false), oil_water_simulation(false), dimensionless_form(false), vortex_sheet_problem(false),
+		air_water_simulation(false), oil_water_simulation(false), bifurcation_test(false), dimensionless_form(false), vortex_sheet_problem(false),
 		is_velocity_advection_active(false), is_sourcing_active(false), is_projection_active(false), is_levelset_advection_active(false), is_viscosity_active(false),
 		fastsweeping_reinitialization(false), sussmanstyle_reinitialization(false), 
 		use_delta_function_formulation(false), use_jump_condition_on_viscosity(false), 
@@ -180,7 +181,7 @@ public: // Initialization Functions
 			water_viscosity = fluid_solver_block.GetFloat("water_viscosity", (T)1);
 			oil_viscosity = fluid_solver_block.GetFloat("oil_viscosity", (T)1);
 		}
-
+				
 		// Gravity
 		gravity = fluid_solver_block.GetVector2("gravity", VT((T)0, (T)-9.8));
 		
@@ -199,6 +200,11 @@ public: // Initialization Functions
 		{
 			water_density = 1;
 			oil_density = 1;
+		}
+		if (bifurcation_test)
+		{
+			water_density = 1;
+			air_density = 1;
 		}
 		surface_tension = fluid_solver_block.GetFloat("surface_tension", (T)1);
 
@@ -454,7 +460,12 @@ public: // Initialization Functions
 				}
 			}
 		}
-		
+		if (bifurcation_test)
+		{
+			water_velocity_field_mac_x->array_for_this.AssignAllValues(T());
+			water_velocity_field_mac_y->array_for_this.AssignAllValues(T());
+		}
+
 		// Initialize Advection Solver
 		DELETE_POINTER(advecting_field_variables);
 		advecting_field_variables = new ADVECTION_2D(*water_levelset, scalar_field_ghost, *vortex_levelset, *water_velocity_field, vector_field_ghost, *water_velocity_field_mac_x, *water_velocity_field_mac_y, vector_field_mac_ghost_x, vector_field_mac_ghost_y, *multithreading); 

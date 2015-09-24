@@ -49,8 +49,8 @@ public:
 
 		return MATRIX_2X2(x[3]*s, -x[1]*s, -x[2]*s, x[0]*s);
 	}
-
-    MATRIX_2X2 operator * (const T a) const
+	
+	MATRIX_2X2 operator * (const T a) const
     {
 		return MATRIX_2X2(a*x[0],a*x[1],a*x[2],a*x[3]);
     }
@@ -58,6 +58,11 @@ public:
     T Determinant(void) const
 	{
 	    return x[0]*x[3] - x[1]*x[2];
+	}
+
+	T Trace(void) const
+	{
+		return x[0] + x[3];
 	}
 
     static MATRIX_2X2 Identity()

@@ -9,6 +9,11 @@ void MONGE_AMPERE_SOLVER::InitializeLinearSolver(const POISSON_SOLVER_TYPE linea
 	case GS:
 		sub_linear_solver = new GAUSS_SEIDEL_METHOD();
 		break;
+	
+	case SOR:
+        sub_linear_solver = new SOR_METHOD();
+        break;
+
 	case BICG:
 		sub_linear_solver = new BICGSTAB_METHOD();
 		break;

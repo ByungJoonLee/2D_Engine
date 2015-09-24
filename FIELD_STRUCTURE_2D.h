@@ -15,29 +15,32 @@ public: // Essential Data
 	ARRAY_2D<TT>				array_for_this;
 
 public: // Properties
-	int						ghost_width;
+	int							ghost_width;
 
 public: // Speedup Variables
-	int						i_start, i_end, i_start_g, i_end_g;
-	int						j_start, j_end, j_start_g, j_end_g;
-	int						i_res_g, ij_res_g;
-	T						x_min, y_min;
-	T						dx, dy;
-	T						one_over_dx, one_over_dy;
-	T						one_over_2dx, one_over_2dy;
-	T						one_over_dx2, one_over_dy2;
-	TT*						values;
+	int							i_start, i_end, i_start_g, i_end_g;
+	int							j_start, j_end, j_start_g, j_end_g;
+	int							i_res_g, ij_res_g;
+	T							x_min, y_min;
+	T							dx, dy;
+	T							one_over_dx, one_over_dy;
+	T							one_over_2dx, one_over_2dy;
+	T							one_over_dx2, one_over_dy2;
+	TT*							values;
 
 public: // Choosing the type
-	bool					is_scalar;
-	bool					is_vector;
+	bool						is_scalar;
+	bool						is_vector;
 
 	// Choosing the component
-	bool					is_x_component;
-	bool					is_y_component;
+	bool						is_x_component;
+	bool						is_y_component;
 
 public: // Multithreading
-	MULTITHREADING*			multithreading;
+	MULTITHREADING*				multithreading;
+
+public: // For drawing option
+	ARRAY_2D<bool>				draw_for_this;
 
 public: // Constructors and Destructor
 	FIELD_STRUCTURE_2D(void)
@@ -90,7 +93,7 @@ public: // Initialization Functions
 		one_over_dy2 = grid.one_over_dy2;
 
 		array_for_this.Initialize(grid.i_start - ghost_width, grid.j_start - ghost_width, grid.i_res + 2*ghost_width, grid.j_res + 2*ghost_width, true);
-
+		
 		values = array_for_this.values;
 
 		i_res_g = array_for_this.i_res;
@@ -105,6 +108,10 @@ public: // Initialization Functions
 			grid.SplitInYDirection(multithreading->num_threads, partial_grids);
 			grid_ghost.SplitInYDirection(multithreading->num_threads, partial_grids_ghost);
 		}
+
+		// For drawing
+		draw_for_this.Initialize(grid.i_start - ghost_width, grid.j_start - ghost_width, grid.i_res + 2*ghost_width, grid.j_res + 2*ghost_width, true);
+		draw_for_this.AssignAllValues(true);
 	}
 
 	void Initialize(const VI& ij_res, const VI& ij_start, const VT& min, const VT& max, const int& ghost_width_input = 0, const bool& is_scalar_input = true, const bool& is_vector_input = false, MULTITHREADING* multithreading_input = 0)

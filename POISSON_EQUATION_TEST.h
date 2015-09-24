@@ -89,7 +89,6 @@ public: // Initialization Function
 
 		// Poisson solver type from script
 		const char* poisson_solver_type_input = poisson_eqn_block.GetString("poisson_solver_type", "Null");
-		
 		if (!strcmp(poisson_solver_type_input, "CG"))
 		{
 			poisson_solver_type = CG;
@@ -98,7 +97,6 @@ public: // Initialization Function
 		{
 			poisson_solver_type = CG;
 		}
-		
 		if (!strcmp(poisson_solver_type_input, "PCG"))
 		{
 			poisson_solver_type = PCG;
@@ -138,10 +136,6 @@ public: // Initialization Function
 			cout << "poisson solver type: " << "PCG" << endl;
 			break;
 
-		case BICG:
-			cout << "poisson solver type: " << "BICG" << endl;
-			break;
-		
 		default:
 			break;
 		}

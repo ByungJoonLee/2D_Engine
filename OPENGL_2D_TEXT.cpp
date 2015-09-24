@@ -597,7 +597,7 @@ void OPENGL_2D_BLOCK_TEXT::PrintBlockText(OPENGL_COLOR text_color, bool is_bg, O
 
 //////////////////////////////////////////////////////////////////////////
 // OPENGL_2D_MENU_TEXT
-#define MENU_LENGTH 250
+#define MENU_LENGTH 290
 OPENGL_2D_MENU_TEXT::OPENGL_2D_MENU_TEXT(FONT_NAME font_name
 			, int font_size
 			, FONT_STYLE font_style
@@ -701,7 +701,7 @@ void OPENGL_2D_MENU_TEXT::PrintSubMenu(OPENGL_POINT pos, const char* str, OPENGL
 	float h_line = ft_font_->LineHeight();
 	float w_line = font_layout_->GetLineLength();
 	float x_lo = -offset_.Width();
-	float x_up = w_line + offset_.Width();;
+	float x_up = w_line + offset_.Width();
 	float y_lo = bbox.Lower().Yf(); 
 	float y_up = bbox.Upper().Yf(); 
 	y_lo = -offset_.Height() - ((hightlight_line + 1) * h_line);

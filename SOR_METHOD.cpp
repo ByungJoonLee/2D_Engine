@@ -1,11 +1,11 @@
-#include "GAUSS_SEIDEL_METHOD.h"
+#include "SOR_METHOD.h"
 
-void GAUSS_SEIDEL_METHOD::Solve(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, const VECTOR_ND<T>& b, const FIELD_STRUCTURE_2D<int>& bc, const int& thread_id)
+void SOR_METHOD::Solve(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, const VECTOR_ND<T>& b, const FIELD_STRUCTURE_2D<int>& bc, const int& thread_id)
 {
-	GaussSeidelMethod(A, x, b, thread_id);
+	SORMethod(A, x, b, thread_id);
 }
 
-void GAUSS_SEIDEL_METHOD::GaussSeidelMethod(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, const VECTOR_ND<T>& b, const int& thread_id)
+void SOR_METHOD::SORMethod(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, const VECTOR_ND<T>& b, const int& thread_id)
 {
 	BEGIN_HEAD_THREAD_WORK
 	{
@@ -23,9 +23,9 @@ void GAUSS_SEIDEL_METHOD::GaussSeidelMethod(const CSR_MATRIX<T>& A, VECTOR_ND<T>
 
 	for(int i = 0; i < max_iteration; i ++)	//NOTE: do not use member variable as an iterator when multithreaded.
 	{
-		residual = GaussSeidelStep(A, x, b, thread_id);
+		residual = SORStep(A, x, b, thread_id);
 		
-        BEGIN_HEAD_THREAD_WORK
+		BEGIN_HEAD_THREAD_WORK
 		{
 			num_iteration ++;
 		}
@@ -33,26 +33,26 @@ void GAUSS_SEIDEL_METHOD::GaussSeidelMethod(const CSR_MATRIX<T>& A, VECTOR_ND<T>
 
 		if(residual < tolerance) 
 		{
-			cout << "--------------Gauss-Seidel Iteration--------------" << endl;
+			cout << "--------------SOR Iteration--------------" << endl;
 			cout << "Converge!!" << endl;
 			cout << "Iteration Number : " << num_iteration << endl;
 			cout << "Residual: " << residual << endl;
-			cout << "--------------------------------------------------" << endl;
+			cout << "-----------------------------------------" << endl;
 			break;
 		}
 		if (i == max_iteration - 1)
 		{
-			cout << "--------------Gauss-Seidel Iteration--------------" << endl;
+			cout << "--------------SOR Iteration--------------" << endl;
 			cout << "Not Converge T^T" << endl;
 			cout << "Residual: " << residual << endl;
-			cout << "--------------------------------------------------" << endl;
+			cout << "-----------------------------------------" << endl;
 		}
 	}
 
 	multithreading->Sync(thread_id);
 }
 
-T GAUSS_SEIDEL_METHOD::GaussSeidelStep(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, const VECTOR_ND<T>& div, const int& thread_id) // this_matrix * x -> b
+T SOR_METHOD::SORStep(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, const VECTOR_ND<T>& div, const int& thread_id) // this_matrix * x -> b
 {
 	assert(A.N == x.num_dimension);
 	assert(x.num_dimension == div.num_dimension);
@@ -99,14 +99,17 @@ T GAUSS_SEIDEL_METHOD::GaussSeidelStep(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, 
 			v += A.values[vix]*xval[A.column_index[vix]];
 		}
 
-        residual_temp = divval[row] - v;
+		residual_temp = divval[row] - v;
 
-		if(A_ii != 0) xval[row] += residual_temp/A_ii;
+        if(A_ii != 0)
+		{
+			xval[row] += omega*residual_temp/A_ii;
+		}
 		// this cell is surrounded by Neumann cells if A_ii = 0.
 
 		residual_sum += POW2(residual_temp);
 	}
-        
+
 	multithreading->SyncSum(thread_id, residual_sum);
 
 	residual_sum = sqrt(residual_sum);
