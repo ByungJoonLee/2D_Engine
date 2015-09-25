@@ -811,7 +811,7 @@ public: // Advancing
 			{
 				if (vortex_sheet_problem)
 				{
-					magnitude_of_gradient_old.Initialize(base_grid, 2);
+					/*magnitude_of_gradient_old.Initialize(base_grid, 2);
 
 					water_levelset->ComputeGradient();
 
@@ -906,7 +906,7 @@ public: // Advancing
 					{
 						T ratio_of_gradient = magnitude_of_gradient_new(i, j)/magnitude_of_gradient_old(i, j);
 						vortex_levelset->arr(i, j) = ratio_of_gradient*vortex_levelset->arr(i, j);
-					}
+					}*/
 				}
 				else
 				{

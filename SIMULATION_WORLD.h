@@ -411,7 +411,20 @@ public: // Initialization Functions
 					}
 					water_levelset.FillGhostCellsFromThreaded(&(water_levelset.phi), false);
 				}
-			} 
+			}
+			if (vortex_sheet_problem)
+			{
+				LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+				GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+				int i(0), j(0);
+				LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+				{
+					T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
+					vortex_levelset(i, j) = y_coor + 0.05*sin(PI*x_coor);
+				}
+				vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false);
+			}
 		}
 		else if (numerical_test_solver)
 		{
