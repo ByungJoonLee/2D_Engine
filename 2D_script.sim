@@ -2,7 +2,7 @@ SIMULATION_WORLD
 {
 	// simulation properties
 	dt = 0.000001
-	max_dt = 1.0
+	max_dt = 15
 	CFL = 0.9
 	
 	// simulation options
@@ -17,14 +17,20 @@ SIMULATION_WORLD
 	last_frame = 300000
 	
 	// Options for Simulations
-	fluid_solver = false
-	numerical_test_solver = true
+	fluid_solver 								= true
+	numerical_test_solver 						= false
 	
 	FLUID_SOLVER_OPTIONS
 	{
-		air_water_simulation    = true
-		oil_water_simulation    = false
-		vortex_sheet_problem    = false
+		air_water_simulation    				= false
+		oil_water_simulation    				= false
+		vortex_sheet_problem    				= true
+		bifurcation_test						= false
+	
+		VORTEX_SHEET_PROBLEM_TEST_NUMBER
+		{
+			test_number							= 2
+		}
 	}
 	
 	NUMERICAL_TEST_OPTIONS
@@ -42,11 +48,6 @@ SIMULATION_WORLD
 		POISSON_EQUATION_WITH_JUMP_CONDITION_TEST_NUMBER
 		{
 			test_number							= 5
-		}
-		
-		MONGE_AMPERE_EQUATION_TEST_NUMBER
-		{
-			test_number							= 1
 		}
 	}
 	
@@ -66,7 +67,7 @@ SIMULATION_WORLD
 				resolution_scale = 1
 
 				start_indices = (0,0)
-				base_grid_resolution = (41, 61)
+				base_grid_resolution = (81, 121)
 				base_grid_min = ( -1, -1.5)
 				base_grid_max = ( 1, 1.5)
 			}
@@ -113,13 +114,22 @@ SIMULATION_WORLD
 		
 		VORTEX_SHEET_PROBLEM
 		{
-			PIPE_OPTIONS
+			GRID_STRUCTURE_2D
 			{
-				is_vertical = true
-				is_parallel = false
+				resolution_scale = 1
+
+				start_indices = (0,0)
+				base_grid_resolution = (257, 257)
+				base_grid_min = ( -1, -1)
+				base_grid_max = (  1,  1)
 			}
-	
-			GRID_STRUCTURE_2D_VERTICAL
+
+			padding_width = 2
+		}
+		
+		BIFURCATION_TEST
+		{
+			GRID_STRUCTURE_2D
 			{
 				resolution_scale = 1
 
@@ -128,16 +138,7 @@ SIMULATION_WORLD
 				base_grid_min = ( 0.02, 0)
 				base_grid_max = ( 1.28, 3.14)
 			}
-
-			GRID_STRUCTURE_2D_PARALLEL
-			{
-				resolution_scale = 1
-	
-				start_indices = (0,0)
-				base_grid_resolution = (51, 41, 41)
-				base_grid_min = ( 0, -1.28, -1.28)
-				base_grid_max = ( 3.20, 1.28, 1.28)
-			}
+		
 			padding_width = 2
 		}
 		
@@ -240,16 +241,22 @@ SIGNAL_PROCESSING_TEST
 
 MONGE_AMPERE_EQUATION_TEST
 {
-	tolerance = 0.0000001
-	max_iteration_for_sub_linear_solver = 100000
-	max_iteration_for_Newton_Method = 5
+	test_number = 1
+	
+	tolerance = 0.00000001
+	max_iteration_for_sub_linear_solver = 1000000
+	max_iteration_for_Newton_Method = 1000
 			
-	is_regularized = false
+	is_regularized = true
+	
+	n_y = 32;
+	N_point = 10000;
 	
 	// Damping parameter
 	alpha = 1
 	
-	sub_linear_solver_type = "GS"
+	sub_linear_solver_type = "SOR"
+	omega = 1.1
 	//MULTIGRID, CG, PCG, HYBRID, GS, BICG
 
 	poisson_solver_type = "PCG"
@@ -262,9 +269,9 @@ FLUID_SOLVER_UNIFORM
 	{
 		is_velocity_advection_active = true
 		is_sourcing_active = true
-		is_projection_active = true
+		is_projection_active = false
 		is_levelset_advection_active = true
-		is_viscosity_active = true
+		is_viscosity_active = false
 
 		fastsweeping_reinitialization = false
 		sussmanstyle_reinitialization = true
@@ -427,12 +434,8 @@ FLUID_SOLVER_UNIFORM
 	
 	VORTEX_SHEET_PROBLEM
 	{
-		is_velocity_advection_active = true
-		is_sourcing_active = true
-		is_projection_active = true
 		is_levelset_advection_active = true
-		is_viscosity_active = true
-
+		
 		fastsweeping_reinitialization = false
 		sussmanstyle_reinitialization = true
 		
@@ -444,7 +447,10 @@ FLUID_SOLVER_UNIFORM
 		curvature_by_normal_vector = false
 		curvature_by_levelset = true
 		
+		order_for_time_advancing = 3
+		
 		use_rk_3rd = false
+		use_mac_grid = false
 		
 		semi_implicit_approach = true
 		dimensionless_form = true
@@ -480,8 +486,8 @@ FLUID_SOLVER_UNIFORM
 		
 		PROJECTION
 		{			
-			tolerance = 0.000001
-			max_iteration = 10000
+			tolerance = 0.0000001
+			max_iteration = 100000
 
 			minimum_x_res = 128
 
@@ -504,14 +510,76 @@ FLUID_SOLVER_UNIFORM
 		}
 
 		ghost_width = 3
-		use_water_levelset = true
-		
-		gravity = (0, -980)
+	}
+	
+	BIFURCATION_TEST
+	{
+		is_velocity_advection_active = true
+		is_sourcing_active = true
+		is_projection_active = true
+		is_levelset_advection_active = false
+		is_viscosity_active = true
 
-		water_viscosity = 0.01
-		water_density = 0.995
-		surface_tension = 8.54
-		oil_density = 0.905
-		oil_viscosity = 6.01
+		use_rk_3rd = false
+		use_mac_grid = true
+		use_rk_3rd_for_reinitialization = false
+
+		CSF_model = false
+
+		use_delta_function_formulation = true
+		use_jump_condition_on_viscosity = false
+
+		curvature_by_normal_vector = false
+		curvature_by_levelset = true
+
+		order_for_time_advancing = 3
+
+		LEVELSET_ADVECTION
+		{
+			use_5th_weno = true
+			use_3rd_eno = false
+			gradient_augmented_method = false
+			epsilon = 0.000001
+		}
+			
+		VELOCITY_ADVECTION
+		{
+			use_5th_weno_v = false
+			use_3rd_eno_v = true
+			epsilon = 0.000001
+		}	
+
+		PROJECTION
+		{			
+			tolerance = 0.000001
+			max_iteration = 10000
+			
+			air_bubble_rising = true
+			water_drop = false
+			
+			poisson_solver_type = "PCG"
+			//MULTIGRID, CG, PCG, HYBRID, GS, CUDAPCG, CUDACG
+
+			use_multilevel_method = false
+			use_2nd_order = false
+			use_variable_density = true
+
+			artificial_viscosity = 1
+
+			Dirichlet_Boundary_Condition = false
+			Neumann_Boundary_Condition = true
+		}
+
+		cfl_number = 0.5
+
+		ghost_width = 3
+
+		gravity = (0, -9.8)
+
+		water_viscosity = 0.001137
+		water_density = 1000
+		surface_tension = 0.0728
+		air_density = 1.226
+		air_viscosity = 0.0000178	
 	}
 }

@@ -9,6 +9,7 @@ enum  POISSON_SOLVER_TYPE                                   {NO_SOLVER, CG, PCG,
 #define BC_NULL												-3
 #define BC_NEUM												-4
 #define BC_IMPLICIT											-5
+#define BC_PER												-6
 
 #define CLAMP(v, min, max)									((v) < (min) ? (min) : ((v) > (max) ? (max) : (v)))
 

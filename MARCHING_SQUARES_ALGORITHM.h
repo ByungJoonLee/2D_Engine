@@ -354,7 +354,7 @@ public: // Member Functions
 						const T phi0 = phi[Node_of_Edges[edge][0]];
 						const T phi1 = phi[Node_of_Edges[edge][1]];
 						
-						//if (phi0*phi1 < (T)0)
+						if (phi0*phi1 < (T)0)
 						{
 							VT vertex_position = (abs(phi1)*NodePosition(thread_id, n0, i, k) + abs(phi0)*NodePosition(thread_id, n1, i, k))/(abs(phi0) + abs(phi1));
 							VT vertex_normal = levelset->UnitNormal(vertex_position);

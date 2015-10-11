@@ -35,8 +35,6 @@ void CG_METHOD::CGMethod(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, const VECTOR_N
 
 	DotProduct(res, p, res_old);
 
-	num_iteration = 0;
-	
 	while (num_iteration < max_iteration)
 	{
 		A.Multiply(p, Ap);

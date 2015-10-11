@@ -165,19 +165,39 @@ void ADVECTION_2D::Solve_Velocity(const T& dt)
 
 void ADVECTION_2D::Solve_Levelset(const T& dt, const int& thread_id)
 {
-	// Water Levelset Advection with MAC Grid
-	if (use_5th_weno)
+	if (use_mac_grid)
 	{
-		ADVECTION_METHOD_2D<T>::WENO5th(water_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, epsilon, multithreading, thread_id);
-	}
-	else if (use_3rd_eno)
-	{
-		ADVECTION_METHOD_2D<T>::ENO3rd(water_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, multithreading, thread_id);
-	}
-	else if (use_1st_sl)
-	{
+		// Water Levelset Advection with MAC Grid
+		if (use_5th_weno)
+		{
+			ADVECTION_METHOD_2D<T>::WENO5th(water_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, epsilon, multithreading, thread_id);
+		}
+		else if (use_3rd_eno)
+		{
+			ADVECTION_METHOD_2D<T>::ENO3rd(water_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, multithreading, thread_id);
+		}
+		else if (use_1st_sl)
+		{
 		
+		}
 	}
+	else
+	{
+		// Water Levelset Advection with MAC Grid
+		if (use_5th_weno)
+		{
+			ADVECTION_METHOD_2D<T>::WENO5th(water_signed_distance_field, scalar_field_ghost, vector_field_ghost, dt, epsilon);
+		}
+		else if (use_3rd_eno)
+		{
+			ADVECTION_METHOD_2D<T>::ENO3rd(water_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, multithreading, thread_id);
+		}
+		else if (use_1st_sl)
+		{
+		
+		}
+	}
+	
 }
 
 void ADVECTION_2D::Solve_Levelset(const T& dt)
@@ -245,6 +265,43 @@ void ADVECTION_2D::Solve_Levelset(const T& dt)
 	}
 }
 
+void ADVECTION_2D::Solve_Second_Levelset(const T& dt, const int& thread_id)
+{
+	if (use_mac_grid)
+	{
+		// Water Levelset Advection with MAC Grid
+		if (use_5th_weno)
+		{
+			ADVECTION_METHOD_2D<T>::WENO5th(second_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, epsilon, multithreading, thread_id);
+		}
+		else if (use_3rd_eno)
+		{
+			ADVECTION_METHOD_2D<T>::ENO3rd(second_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, multithreading, thread_id);
+		}
+		else if (use_1st_sl)
+		{
+		
+		}
+	}
+	else
+	{
+		// Water Levelset Advection with MAC Grid
+		if (use_5th_weno)
+		{
+			ADVECTION_METHOD_2D<T>::WENO5th(second_signed_distance_field, scalar_field_ghost, vector_field_ghost, dt, epsilon);
+		}
+		else if (use_3rd_eno)
+		{
+			ADVECTION_METHOD_2D<T>::ENO3rd(second_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, multithreading, thread_id);
+		}
+		else if (use_1st_sl)
+		{
+		
+		}
+	}
+	
+}
+
 void ADVECTION_2D::Solve_Vortex(const T& dt)
 {
 	// Water Levelset Advection with MAC Grid
@@ -292,36 +349,28 @@ void ADVECTION_2D::Solve_Vortex(const T& dt, const int& thread_id)
 	// Water Levelset Advection with MAC Grid
 	if (use_5th_weno)
 	{
-		if (use_mac_grid)
+		// Boundary Condition
+		scalar_field_ghost.FillGhostCellsFrom(vortex_signed_distance_field.array_for_this, true);
+
+		for (int k = scalar_field_ghost.j_start; k <= scalar_field_ghost.j_end; k++)
 		{
-			ADVECTION_METHOD_2D<T>::WENO5th(vortex_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, epsilon, multithreading, thread_id);
+			for (int ghost = 1; ghost <= scalar_field_ghost.ghost_width; ghost++)
+			{
+				scalar_field_ghost(scalar_field_ghost.i_start - ghost, k) = scalar_field_ghost(scalar_field_ghost.i_end - ghost, k);
+				scalar_field_ghost(scalar_field_ghost.i_end + ghost, k) = scalar_field_ghost(scalar_field_ghost.i_start + ghost, k);
+			}
 		}
-		else
+
+		for (int k = scalar_field_ghost.i_start; k <= scalar_field_ghost.i_end; k++)
 		{
-			// Boundary Condition
-			scalar_field_ghost.FillGhostCellsFrom(vortex_signed_distance_field.array_for_this, true);
-
-			for (int k = scalar_field_ghost.j_start; k <= scalar_field_ghost.j_end; k++)
+			for (int ghost = 1; ghost <= scalar_field_ghost.ghost_width; ghost++)
 			{
-				for (int ghost = 1; ghost <= scalar_field_ghost.ghost_width; ghost++)
-				{
-					scalar_field_ghost(scalar_field_ghost.i_start - ghost, k) = scalar_field_ghost(scalar_field_ghost.i_end - ghost, k);
-					scalar_field_ghost(scalar_field_ghost.i_end + ghost, k) = scalar_field_ghost(scalar_field_ghost.i_start + ghost, k);
-				}
+				scalar_field_ghost(k, scalar_field_ghost.j_start - ghost) = scalar_field_ghost(k, scalar_field_ghost.j_end - ghost);
+				scalar_field_ghost(k, scalar_field_ghost.j_end + ghost) = scalar_field_ghost(k, scalar_field_ghost.j_start + ghost);
 			}
-
-			for (int k = scalar_field_ghost.i_start; k <= scalar_field_ghost.i_end; k++)
-			{
-				for (int ghost = 1; ghost <= scalar_field_ghost.ghost_width; ghost++)
-				{
-					scalar_field_ghost(k, scalar_field_ghost.j_start - ghost) = scalar_field_ghost(k, scalar_field_ghost.j_end - ghost);
-					scalar_field_ghost(k, scalar_field_ghost.j_end + ghost) = scalar_field_ghost(k, scalar_field_ghost.j_start + ghost);
-				}
-			}
-
-			ADVECTION_METHOD_2D<T>::WENO5th(vortex_signed_distance_field, scalar_field_ghost, vector_field_ghost, dt, epsilon);
 		}
-			
+
+		ADVECTION_METHOD_2D<T>::WENO5th(vortex_signed_distance_field, scalar_field_ghost, vector_field_ghost, dt, epsilon);
 	}
 	if (use_3rd_eno)
 	{
@@ -336,10 +385,46 @@ void ADVECTION_2D::ReinitializationBySussman(const T& dt, FIELD_STRUCTURE_2D<T>&
 	//ADVECTION_METHOD_2D<T>::SubcellFixedReinitialization(water_signed_distance_field, scalar_field_ghost, dt, epsilon, sign_function, phi_0); 
 	water_levelset.FillGhostCellsContinuousDerivativesFrom(water_levelset.arr, true);
 }
+
 void ADVECTION_2D::ReinitializationBySussman(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function, const int& thread_id)
 {
+	scalar_field_ghost.FillGhostCellsFrom(water_signed_distance_field.array_for_this, true, thread_id);
 	ADVECTION_METHOD_2D<T>::WENO5thReinitialization(water_signed_distance_field, scalar_field_ghost, dt, epsilon, sign_function, multithreading, thread_id); 
 	//ADVECTION_METHOD_2D<T>::GodunovReinitialization(water_signed_distance_field, scalar_field_ghost, dt, epsilon, sign_function, phi_0); 
 	//ADVECTION_METHOD_2D<T>::SubcellFixedReinitialization(water_signed_distance_field, scalar_field_ghost, dt, epsilon, sign_function, phi_0); 
 	water_levelset.FillGhostCellsContinuousDerivativesFrom(water_levelset.arr, true);
+}
+
+void ADVECTION_2D::ReinitializationBySussmanForVortex(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function, const int& thread_id)
+{
+	// Boundary Condition
+	scalar_field_ghost.FillGhostCellsFrom(water_signed_distance_field.array_for_this, true);
+	for (int k = scalar_field_ghost.j_start; k <= scalar_field_ghost.j_end; k++)
+	{
+		for (int ghost = 1; ghost <= scalar_field_ghost.ghost_width; ghost++)
+		{
+			scalar_field_ghost(scalar_field_ghost.i_start - ghost, k) = scalar_field_ghost(scalar_field_ghost.i_end - ghost, k);
+			scalar_field_ghost(scalar_field_ghost.i_end + ghost, k) = scalar_field_ghost(scalar_field_ghost.i_start + ghost, k);
+		}
+	}
+
+	/*for (int k = scalar_field_ghost.i_start; k <= scalar_field_ghost.i_end; k++)
+	{
+		for (int ghost = 1; ghost <= scalar_field_ghost.ghost_width; ghost++)
+		{
+			scalar_field_ghost(k, scalar_field_ghost.j_start - ghost) = scalar_field_ghost(k, scalar_field_ghost.j_start + ghost);
+			scalar_field_ghost(k, scalar_field_ghost.j_end + ghost) = scalar_field_ghost(k, scalar_field_ghost.j_end - ghost);
+		}
+	}*/
+
+	for (int k = scalar_field_ghost.i_start; k <= scalar_field_ghost.i_end; k++)
+	{
+		for (int ghost = 1; ghost <= scalar_field_ghost.ghost_width; ghost++)
+		{
+			scalar_field_ghost(k, scalar_field_ghost.j_start - ghost) = scalar_field_ghost(k, scalar_field_ghost.j_end - ghost) - 2;
+			scalar_field_ghost(k, scalar_field_ghost.j_end + ghost) = scalar_field_ghost(k, scalar_field_ghost.j_start + ghost) + 2;
+		}
+	}
+
+	ADVECTION_METHOD_2D<T>::WENO5thReinitialization(water_signed_distance_field, scalar_field_ghost, dt, epsilon, sign_function, multithreading, thread_id); 
 }

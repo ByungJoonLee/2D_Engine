@@ -53,6 +53,7 @@ public: // Initialization Functions
 
 public: // Solver
 	void Solve(FIELD_STRUCTURE_1D<T>& pressure, FIELD_STRUCTURE_1D<T>& density, FIELD_STRUCTURE_1D<int>& bc, const FIELD_STRUCTURE_1D<T>& div, const FIELD_STRUCTURE_1D<T>& variable, const LEVELSET_1D& levelset, const FIELD_STRUCTURE_1D<T>& jc_on_solution, const FIELD_STRUCTURE_1D<T>& jc_on_derivative, const int& thread_id);
+	void Solve(FIELD_STRUCTURE_2D<T>& solution, FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& b);
 	void Solve(FIELD_STRUCTURE_2D<T>& solution, FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& b, const int& thread_id);
 	void Solve(FIELD_STRUCTURE_2D<T>& pressure, FIELD_STRUCTURE_2D<T>& density, FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& div, const LEVELSET_2D& levelset, const FIELD_STRUCTURE_2D<T>& jc_on_solution, const FIELD_STRUCTURE_2D<T>& jc_on_derivative);
 	void Solve(FIELD_STRUCTURE_2D<T>& pressure, FIELD_STRUCTURE_2D<T>& density, FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& div, const FIELD_STRUCTURE_2D<T>& variable, const LEVELSET_2D& levelset, const FIELD_STRUCTURE_2D<T>& jc_on_solution, const FIELD_STRUCTURE_2D<T>& jc_on_derivative, const int& thread_id);
@@ -62,6 +63,7 @@ public: // Solver
 public: // Member Functions
 	void SetTolerance(const T& tolerance_input);
 	
+	void BuildLinearSystem(CSR_MATRIX<T>& A_matrix, VECTOR_ND<T>& x_vector, VECTOR_ND<T>& b_vector, const FIELD_STRUCTURE_2D<T>& solution, const FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& RHS);
 	void BuildLinearSystem(CSR_MATRIX<T>& A_matrix, VECTOR_ND<T>& x_vector, VECTOR_ND<T>& b_vector, const FIELD_STRUCTURE_2D<T>& solution, const FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& RHS, const int& thread_id);
 	void BuildLinearSystemNodeForAxiSymmetric(CSR_MATRIX<T>& A_matrix, VECTOR_ND<T>& x_vector, VECTOR_ND<T>& b_vector, const FIELD_STRUCTURE_2D<T>& coef_1, const FIELD_STRUCTURE_2D<T>& coef_2, const FIELD_STRUCTURE_2D<T>& coef_3, const FIELD_STRUCTURE_2D<T>& coef_4, const FIELD_STRUCTURE_2D<T>& pressure, const FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& div);
 	void BuildLinearSystemNodeForSemiImplicitViscosity(CSR_MATRIX<T>& A_matrix, VECTOR_ND<T>& x_vector, VECTOR_ND<T>& b_vector, const FIELD_STRUCTURE_2D<T>& coef_1, const FIELD_STRUCTURE_2D<T>& coef_2, const FIELD_STRUCTURE_2D<T>& coef_3, const FIELD_STRUCTURE_2D<T>& coef_4, const FIELD_STRUCTURE_2D<T>& coef_5, const FIELD_STRUCTURE_2D<T>& velocity, const FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& explicit_term);

@@ -1262,7 +1262,7 @@ public:
 	{
 		ARRAY_2D<TT>& rho_array(rho.array_for_this);
 
-		rho_ghost.FillGhostCellsFrom(rho_array, true, thread_id);
+		//rho_ghost.FillGhostCellsFrom(rho_array, true, thread_id);
 
 		multithreading.Sync(thread_id);
 

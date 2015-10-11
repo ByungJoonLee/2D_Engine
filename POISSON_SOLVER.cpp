@@ -88,6 +88,16 @@ void POISSON_SOLVER::Solve(FIELD_STRUCTURE_1D<T>& pressure, FIELD_STRUCTURE_1D<T
 	VectorToGrid(x, pressure, bc, thread_id);
 }
 
+void POISSON_SOLVER::Solve(FIELD_STRUCTURE_2D<T>& solution, FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& b_vector)
+{
+	assert(linear_solver != 0);
+
+	BuildLinearSystem(A, x, b, solution, bc, b_vector);
+
+	linear_solver->Solve(A, x, b, bc);
+	VectorToGrid(x, solution, bc);
+}
+
 void POISSON_SOLVER::Solve(FIELD_STRUCTURE_2D<T>& solution, FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& b_vector, const int& thread_id)
 {
 	assert(linear_solver != 0);
@@ -112,7 +122,15 @@ void POISSON_SOLVER::Solve(FIELD_STRUCTURE_2D<T>& pressure, FIELD_STRUCTURE_2D<T
 	one_over_density.FillGhostCellsFrom(one_over_density.array_for_this, false);
 
 	BuildLinearSystemNodeJumpConditionVaribleCoefficient(A, x, b, pressure, one_over_density, bc, div, levelset, jc_on_solution, jc_on_derivative);
-		
+	
+	ofstream fout;
+	fout.open("Matrix_Test");
+	for (int i = 0; i < A.nz; i++)
+	{
+		fout << A.values[i] << endl;
+	}
+	fout.close();
+
 	linear_solver->Solve(A, x, b, bc);
 		
 	VectorToGrid(x, pressure, bc);
@@ -255,6 +273,155 @@ void POISSON_SOLVER::BuildLinearSystemNodeForAxiSymmetric(CSR_MATRIX<T>& A_matri
 								
 		x_vector[bc(i, j)] = pressure(i, j);
 		
+	}
+}
+
+void POISSON_SOLVER::BuildLinearSystem(CSR_MATRIX<T>& A_matrix, VECTOR_ND<T>& x_vector, VECTOR_ND<T>& b_vector, const FIELD_STRUCTURE_2D<T>& solution, const FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& RHS)
+{
+	const int num_all_full_cells = AssignSequentialindicesToFullCells(bc);
+	const int nnz = CountNonZeroElements(bc);
+		
+	// Initialize A matrix, x vector, and b vector
+	A_matrix.Initialize(num_all_full_cells, nnz);
+	x_vector.Initialize(num_all_full_cells, true);
+	b_vector.Initialize(num_all_full_cells);
+		
+	// Speed up variables 
+	int i_start(solution.i_start), i_end(solution.i_end), j_start(solution.j_start), j_end(solution.j_end);
+	T dx(solution.dx), dy(solution.dy), one_over_dx(solution.one_over_dx), one_over_dy(solution.one_over_dy), one_over_dx2(solution.one_over_dx2), one_over_dy2(solution.one_over_dy2);
+
+	const T dxdx = POW2(solution.grid.dx), inv_dxdx = (T)1/dxdx, dydy = POW2(solution.grid.dy), inv_dydy = (T)1/dydy;
+
+	GRID_ITERATION_2D(solution.grid)
+	{
+		if (bc(i, j) < 0)
+		{
+			continue;
+		}
+
+		T coef_ij = 0;					// For optimization, inv_dxdx is multiplied at the end
+				
+		// If neighbor is full cell
+		if (bc(i - 1, j) > -1)
+		{
+			coef_ij += 1;
+			A_matrix.AssignValue(bc(i, j), bc(i - 1, j), -inv_dxdx);
+		}
+		if (bc(i + 1, j) > -1)
+		{
+			coef_ij += 1;
+			A_matrix.AssignValue(bc(i, j), bc(i + 1, j), -inv_dxdx);
+		}
+		if (bc(i, j - 1) > -1)
+		{
+			coef_ij += 1;
+			A_matrix.AssignValue(bc(i, j), bc(i, j - 1), -inv_dydy);
+		}
+		if (bc(i, j + 1) > -1)
+		{
+			coef_ij += 1;
+			A_matrix.AssignValue(bc(i, j), bc(i, j + 1), -inv_dydy);
+		}
+			
+		if (bc(i - 1, j) == BC_DIR)
+		{
+			coef_ij += 1;
+		}
+		if (bc(i + 1, j) == BC_DIR)
+		{
+			coef_ij += 1;
+		}
+		if (bc(i, j - 1) == BC_DIR)
+		{
+			coef_ij += 1;
+		}
+		if (bc(i, j + 1) == BC_DIR)
+		{
+			coef_ij += 1;
+		}
+		
+		if (bc(i - 1, j) == BC_NEUM)
+		{
+			coef_ij += 1;
+		}
+		if (bc(i + 1, j) == BC_NEUM)
+		{
+			coef_ij += 1;
+		}
+		if (bc(i, j - 1) == BC_NEUM)
+		{
+			coef_ij += 1;
+		}
+		if (bc(i, j + 1) == BC_NEUM)
+		{
+			coef_ij += 1;
+		}
+
+		if (bc(i - 1, j) == BC_PER)
+		{
+			coef_ij += 0;
+		}
+		if (bc(i + 1, j) == BC_PER)
+		{
+			coef_ij += 0;
+		}
+		if (bc(i, j - 1) == BC_PER)
+		{
+			coef_ij += 0;
+		}
+		if (bc(i, j + 1) == BC_PER)
+		{
+			coef_ij += 0;
+		}
+
+		// If neighbor is periodic domain
+		if (bc(i - 1, j) == BC_PER)
+		{
+			coef_ij += 1;
+			A_matrix.AssignValue(bc(i, j), bc(i_end - 1, j), -inv_dxdx);
+		}
+		if (bc(i + 1, j) == BC_PER)
+		{
+			coef_ij += 1;
+			A_matrix.AssignValue(bc(i, j), bc(i_start + 1, j), -inv_dxdx);
+		}
+		if (bc(i, j - 1) == BC_PER)
+		{
+			coef_ij += 1;
+			A_matrix.AssignValue(bc(i, j), bc(i, j_end), -inv_dydy);
+		}
+		if (bc(i, j + 1) == BC_PER)
+		{
+			coef_ij += 1;
+			A_matrix.AssignValue(bc(i, j), bc(i, j_start), -inv_dydy);
+		}
+		if (coef_ij == 0)
+		{
+			coef_ij = 1;
+		}
+
+		A_matrix.AssignValue(bc(i, j), bc(i, j), coef_ij*inv_dydy);
+			
+		b_vector[bc(i, j)] = -RHS(i, j);
+
+		if (bc(i - 1, j) == BC_DIR)
+		{
+			b_vector[bc(i, j)] += inv_dxdx*solution(i - 1, j);
+		}
+		if (bc(i + 1, j) == BC_DIR)
+		{
+			b_vector[bc(i, j)] += inv_dxdx*solution(i + 1, j);
+		}
+		if (bc(i, j - 1) == BC_DIR)
+		{
+			b_vector[bc(i, j)] += inv_dxdx*solution(i, j - 1);
+		}
+		if (bc(i, j + 1) == BC_DIR)
+		{
+			b_vector[bc(i, j)] += inv_dxdx*solution(i, j + 1);
+		}
+		
+		x_vector[bc(i, j)] = solution(i, j);
 	}
 }
 
@@ -556,7 +723,7 @@ void POISSON_SOLVER::BuildLinearSystemNodeJumpConditionVaribleCoefficient(CSR_MA
 		beta_r = variable(i, j)*variable(i + 1, j)*(abs(levelset_r) + abs(levelset_c))/(variable(i + 1, j)*abs(levelset_c) + variable(i, j)*abs(levelset_r));
 		beta_b = variable(i, j)*variable(i, j - 1)*(abs(levelset_b) + abs(levelset_c))/(variable(i, j)*abs(levelset_b) + variable(i, j - 1)*abs(levelset_c));
 		beta_t = variable(i, j)*variable(i, j + 1)*(abs(levelset_t) + abs(levelset_c))/(variable(i, j + 1)*abs(levelset_c) + variable(i, j)*abs(levelset_t));
-
+		
 		// If neighbor is full cell
 		if (bc(i - 1, j) > -1)
 		{
@@ -578,7 +745,7 @@ void POISSON_SOLVER::BuildLinearSystemNodeJumpConditionVaribleCoefficient(CSR_MA
 			coef_ij += beta_t;
 			A_matrix.AssignValue(bc(i, j), bc(i, j + 1), -beta_t*inv_dydy);
 		}
-			
+		
 		// Dirichlet Boundary Condition
 		if (bc(i - 1, j) == BC_DIR)
 		{
@@ -636,7 +803,46 @@ void POISSON_SOLVER::BuildLinearSystemNodeJumpConditionVaribleCoefficient(CSR_MA
 				coef_ij += 0;
 			}
 		}
-						
+		
+		if (bc(i - 1, j) == BC_PER)
+		{
+			coef_ij += 0;
+		}
+		if (bc(i + 1, j) == BC_PER)
+		{
+			coef_ij += 0;
+		}
+		if (bc(i, j - 1) == BC_PER)
+		{
+			coef_ij += 0;
+		}
+		if (bc(i, j + 1) == BC_PER)
+		{
+			coef_ij += 0;
+		}
+
+		// If neighbor is periodic domain
+		if (bc(i - 1, j) == BC_PER)
+		{
+			coef_ij += beta_l;
+			A_matrix.AssignValue(bc(i, j), bc(i_end - 1, j), -beta_l*inv_dxdx);
+		}
+		if (bc(i + 1, j) == BC_PER)
+		{
+			coef_ij += beta_r;
+			A_matrix.AssignValue(bc(i, j), bc(i_start + 1, j), -beta_r*inv_dxdx);
+		}
+		if (bc(i, j - 1) == BC_PER)
+		{
+			coef_ij += beta_b;
+			A_matrix.AssignValue(bc(i, j), bc(i, j_end), -beta_b*inv_dydy);
+		}
+		if (bc(i, j + 1) == BC_PER)
+		{
+			coef_ij += beta_t;
+			A_matrix.AssignValue(bc(i, j), bc(i, j_start), -beta_t*inv_dydy);
+		}
+
 		if (coef_ij == 0)
 		{
 			coef_ij = 1;
@@ -1275,6 +1481,23 @@ int POISSON_SOLVER::CountNonZeroElements(const FIELD_STRUCTURE_2D<int>& bc)
 			{
 				nnz++;
 			}
+			// For Periodic Boundary Condition
+			if (bc(i - 1, j) == BC_PER)
+			{
+				nnz++;
+			}
+			if (bc(i + 1, j) == BC_PER)
+			{
+				nnz++;
+			}
+			if (bc(i, j - 1) == BC_PER)
+			{
+				nnz++;
+			}
+			if (bc(i, j + 1) == BC_PER)
+			{
+				nnz++;
+			}
 		}
 	}
 		
@@ -1342,7 +1565,10 @@ void POISSON_SOLVER::VectorToGrid(const VECTOR_ND<T>& x, FIELD_STRUCTURE_2D<T>& 
 	int i, j;
 	LOOPS_2D(i, j, pressure.i_start, pressure.j_start, pressure.i_end, pressure.j_end)
 	{
-		pressure.array_for_this(i, j) = x[bc(i, j)];
+		if (bc(i, j) > -1)
+		{
+			pressure.array_for_this(i, j) = x[bc(i, j)];
+		}
 	}
 }
 

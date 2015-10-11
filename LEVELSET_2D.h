@@ -47,9 +47,12 @@ public: // Options for Axisymmetric object
 public: // Multithreading
 	MULTITHREADING*					multithreading;
 
+public: // For drawing - Level you want to draw
+	T								epsilon;
+
 public: // Constructors and Destructor
 	LEVELSET_2D(void)
-		: grid(signed_distance_field.grid), partial_grids(signed_distance_field.partial_grids), partial_grids_ghost(signed_distance_field.partial_grids_ghost), phi(signed_distance_field.array_for_this), arr(signed_distance_field.array_for_this), phi_true(signed_distance_field.array_for_this), sweep_direction(0), ghost_width(signed_distance_field.ghost_width), is_axisymmetric(false)
+		: grid(signed_distance_field.grid), partial_grids(signed_distance_field.partial_grids), partial_grids_ghost(signed_distance_field.partial_grids_ghost), phi(signed_distance_field.array_for_this), arr(signed_distance_field.array_for_this), phi_true(signed_distance_field.array_for_this), sweep_direction(0), ghost_width(signed_distance_field.ghost_width), is_axisymmetric(false), epsilon((T)0)
 	{}
 	
 	~LEVELSET_2D(void)
@@ -697,8 +700,61 @@ public: // Member Functions
 		
 		BEGIN_GRID_ITERATION_2D(partial_grids[thread_id])
 		{
-			gradient(i, j).x = (phi(i+1, j) - phi(i-1, j))*signed_distance_field.one_over_2dx;
-			gradient(i, j).y = (phi(i, j+1) - phi(i, j-1))*signed_distance_field.one_over_2dy;
+			if (i == i_start)
+			{
+				if (j == j_start)
+				{
+					gradient(i, j).x = (phi(i+1, j) - phi(i, j))*signed_distance_field.one_over_dx;
+					gradient(i, j).y = (phi(i, j+1) - phi(i, j))*signed_distance_field.one_over_dy;
+				}
+				else if (j == j_end)
+				{
+					gradient(i, j).x = (phi(i+1, j) - phi(i, j))*signed_distance_field.one_over_dx;
+					gradient(i, j).y = (phi(i, j) - phi(i, j - 1))*signed_distance_field.one_over_dy;
+				}
+				else
+				{
+					gradient(i, j).x = (phi(i+1, j) - phi(i, j))*signed_distance_field.one_over_dx;
+					gradient(i, j).y = (phi(i, j+1) - phi(i, j-1))*signed_distance_field.one_over_2dy;
+				}
+				
+			}
+			else if (i == i_end)
+			{
+				if (j == j_start)
+				{
+					gradient(i, j).x = (phi(i, j) - phi(i - 1, j))*signed_distance_field.one_over_dx;
+					gradient(i, j).y = (phi(i, j+1) - phi(i, j))*signed_distance_field.one_over_dy;
+				}
+				else if (j == j_end)
+				{
+					gradient(i, j).x = (phi(i, j) - phi(i - 1, j))*signed_distance_field.one_over_dx;
+					gradient(i, j).y = (phi(i, j) - phi(i, j - 1))*signed_distance_field.one_over_dy;
+				}
+				else
+				{
+					gradient(i, j).x = (phi(i, j) - phi(i - 1, j))*signed_distance_field.one_over_dx;
+					gradient(i, j).y = (phi(i, j+1) - phi(i, j-1))*signed_distance_field.one_over_2dy;
+				}
+			}
+			else
+			{
+				if (j == j_start)
+				{
+					gradient(i, j).x = (phi(i+1, j) - phi(i-1, j))*signed_distance_field.one_over_2dx;
+					gradient(i, j).y = (phi(i, j+1) - phi(i, j))*signed_distance_field.one_over_dy;
+				}
+				else if (j == j_end)
+				{
+					gradient(i, j).x = (phi(i+1, j) - phi(i-1, j))*signed_distance_field.one_over_2dx;
+					gradient(i, j).y = (phi(i, j) - phi(i, j - 1))*signed_distance_field.one_over_dy;
+				}
+				else
+				{
+					gradient(i, j).x = (phi(i+1, j) - phi(i-1, j))*signed_distance_field.one_over_2dx;
+					gradient(i, j).y = (phi(i, j+1) - phi(i, j-1))*signed_distance_field.one_over_2dy;
+				}
+			}
 		}
 		END_GRID_ITERATION_2D;
 	}

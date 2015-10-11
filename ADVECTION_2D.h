@@ -17,6 +17,9 @@ public: // Essential Data
 	FIELD_STRUCTURE_2D<VT>&			water_velocity_field;
 
 	// Vortex Levelset
+	LEVELSET_2D&					second_levelset;
+	FIELD_STRUCTURE_2D<T>&			second_signed_distance_field;
+
 	LEVELSET_2D&					vortex_levelset;
 	FIELD_STRUCTURE_2D<T>&			vortex_signed_distance_field;
 
@@ -50,9 +53,9 @@ public: // Multithreading
 	MULTITHREADING&					multithreading;
 
 public: // Constructor and Destructor
-	ADVECTION_2D(LEVELSET_2D& water_levelset_input, FIELD_STRUCTURE_2D<T>& scalar_field_ghost_input, LEVELSET_2D& vortex_levelset_input, FIELD_STRUCTURE_2D<VT>& velocity_field_input, FIELD_STRUCTURE_2D<VT>& vector_field_ghost_input, FIELD_STRUCTURE_2D<T>& velocity_field_mac_x_input, FIELD_STRUCTURE_2D<T>& velocity_field_mac_y_input, FIELD_STRUCTURE_2D<T>& velocity_field_ghost_mac_x_input, FIELD_STRUCTURE_2D<T>& velocity_field_ghost_mac_y_input, MULTITHREADING& multithreading_input)
-		:water_levelset(water_levelset_input), scalar_field_ghost(scalar_field_ghost_input), vortex_levelset(vortex_levelset_input), water_velocity_field(velocity_field_input), vector_field_ghost(vector_field_ghost_input), water_velocity_field_mac_x(velocity_field_mac_x_input), water_velocity_field_mac_y(velocity_field_mac_y_input), velocity_field_mac_ghost_x(velocity_field_ghost_mac_x_input), velocity_field_mac_ghost_y(velocity_field_ghost_mac_y_input),
-		base_grid(water_levelset_input.grid), pressure_field(0), water_signed_distance_field(water_levelset_input.signed_distance_field), vortex_signed_distance_field(vortex_levelset.signed_distance_field), multithreading(multithreading_input)
+	ADVECTION_2D(LEVELSET_2D& water_levelset_input, FIELD_STRUCTURE_2D<T>& scalar_field_ghost_input, LEVELSET_2D& second_levelset_input, LEVELSET_2D& vortex_levelset_input, FIELD_STRUCTURE_2D<VT>& velocity_field_input, FIELD_STRUCTURE_2D<VT>& vector_field_ghost_input, FIELD_STRUCTURE_2D<T>& velocity_field_mac_x_input, FIELD_STRUCTURE_2D<T>& velocity_field_mac_y_input, FIELD_STRUCTURE_2D<T>& velocity_field_ghost_mac_x_input, FIELD_STRUCTURE_2D<T>& velocity_field_ghost_mac_y_input, MULTITHREADING& multithreading_input)
+		:water_levelset(water_levelset_input), scalar_field_ghost(scalar_field_ghost_input), second_levelset(second_levelset_input), vortex_levelset(vortex_levelset_input), water_velocity_field(velocity_field_input), vector_field_ghost(vector_field_ghost_input), water_velocity_field_mac_x(velocity_field_mac_x_input), water_velocity_field_mac_y(velocity_field_mac_y_input), velocity_field_mac_ghost_x(velocity_field_ghost_mac_x_input), velocity_field_mac_ghost_y(velocity_field_ghost_mac_y_input),
+		base_grid(water_levelset_input.grid), pressure_field(0), water_signed_distance_field(water_levelset_input.signed_distance_field), vortex_signed_distance_field(vortex_levelset.signed_distance_field), second_signed_distance_field(second_levelset.signed_distance_field), multithreading(multithreading_input)
 	{
 		use_1st_sl = false;
 		use_5th_weno = false;
@@ -60,6 +63,7 @@ public: // Constructor and Destructor
 		gradient_augmented_method = false;
 		use_5th_weno_v = false;
 		use_3rd_eno_v = false;
+		use_mac_grid = false;
 	}
 
 	~ADVECTION_2D(void)
@@ -75,11 +79,14 @@ public: // Solver
 	void Solve_Levelset(const T& dt, const int& thread_id);
 	void Solve_Levelset(const T& dt);
 	
+	void Solve_Second_Levelset(const T& dt, const int& thread_id);
+	
 	void Solve_Vortex(const T& dt);
 	void Solve_Vortex(const T& dt, const int& thread_id);
 	
 	void ReinitializationBySussman(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function);
 	void ReinitializationBySussman(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function, const int& thread_id);
+	void ReinitializationBySussmanForVortex(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function, const int& thread_id);
 };
 
 

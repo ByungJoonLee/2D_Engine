@@ -76,7 +76,7 @@ public: // Multithreading
 
 public: // Constructor and Destructor
 	SIMULATION_WORLD(void)
-		: multithreading(0), fluid_solver(false), numerical_test_solver(false), air_water_simulation(false), bifurcation_test(false), large_bubble(false), small_bubble(false), oil_water_simulation(false), numerical_integration_test(false), poisson_equation_with_jump_condition(false), is_vertical(false), is_parallel(false), num_current_frame(0), last_frame((int)1000000), dt((T)0), max_dt((T)0), test_number(0)
+		: multithreading(0), fluid_solver(false), numerical_test_solver(false), air_water_simulation(false), vortex_sheet_problem(false), bifurcation_test(false), large_bubble(false), small_bubble(false), oil_water_simulation(false), numerical_integration_test(false), poisson_equation_with_jump_condition(false), is_vertical(false), is_parallel(false), num_current_frame(0), last_frame((int)1000000), dt((T)0), max_dt((T)0), test_number(0)
 	{}
 
 	~SIMULATION_WORLD(void)
@@ -112,6 +112,11 @@ public: // Initialization Functions
 			oil_water_simulation = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").GetBoolean("oil_water_simulation", false);
 			vortex_sheet_problem = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").GetBoolean("vortex_sheet_problem", false);
 			bifurcation_test	 = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").GetBoolean("bifurcation_test", false);
+
+			if (vortex_sheet_problem)
+			{
+				test_number = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").FindBlock("VORTEX_SHEET_PROBLEM_TEST_NUMBER").GetInteger("test_number", (int)1);
+			}
 		}
 		if (numerical_test_solver)
 		{
@@ -156,6 +161,7 @@ public: // Initialization Functions
 			if (vortex_sheet_problem)
 			{
 				cout << "Vortex Sheet Problem is activated!" << endl;
+				cout << "Test Number : #" << test_number << endl;
 			}
 			if (bifurcation_test)
 			{
@@ -338,6 +344,7 @@ public: // Initialization Functions
 			}
 			if (vortex_sheet_problem)
 			{
+				eulerian_solver.test_number = test_number;
 				eulerian_solver.vortex_sheet_problem = vortex_sheet_problem;
 				eulerian_solver.InitializeFromScriptBlock(world_discretization.world_grid, script_reader.FindBlock("FLUID_SOLVER_UNIFORM").FindBlock("VORTEX_SHEET_PROBLEM"), multithreading);
 			}
@@ -414,16 +421,323 @@ public: // Initialization Functions
 			}
 			if (vortex_sheet_problem)
 			{
-				LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
-				GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
-
-				int i(0), j(0);
-				LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+				if (test_number == 1)
 				{
-					T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
-					vortex_levelset(i, j) = y_coor + 0.05*sin(PI*x_coor);
+					LEVELSET_2D& water_levelset = *eulerian_solver.water_levelset;
+					GRID_STRUCTURE_2D& water_grid = water_levelset.grid;
+
+					int i(0), j(0);
+					LOOPS_2D(i, j, water_grid.i_start, water_grid.j_start, water_grid.i_end, water_grid.j_end)
+					{
+						T x_coor = water_grid.x_min + i*water_grid.dx, y_coor = water_grid.y_min + j*water_grid.dy;
+						water_levelset(i, j) = y_coor + 0.05*sin(PI*x_coor);
+					}
+
+					for (int k = water_levelset.grid.j_start; k <= water_levelset.grid.j_end; k++)
+					{
+						for (int ghost = 1; ghost <= water_levelset.ghost_width; ghost++)
+						{
+							water_levelset(water_levelset.grid.i_start - ghost, k) = water_levelset(water_levelset.grid.i_end - ghost, k);
+							water_levelset(water_levelset.grid.i_end + ghost, k) = water_levelset(water_levelset.grid.i_start + ghost, k);
+						}
+					}
+
+					for (int k = water_levelset.grid.i_start; k <= water_levelset.grid.i_end; k++)
+					{
+						for (int ghost = 1; ghost <= water_levelset.ghost_width; ghost++)
+						{
+							water_levelset(k, water_levelset.grid.j_start - ghost) = water_levelset(k, water_levelset.grid.j_end - ghost) - 2;
+							water_levelset(k, water_levelset.grid.j_end + ghost) = water_levelset(k, water_levelset.grid.j_start + ghost) + 2;
+						}
+					}
+
+					LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						vortex_levelset(i, j) = 1;
+					}
+					vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false); 
+				
+					/*LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					int i(0), j(0);
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
+						vortex_levelset(i, j) = y_coor + 0.05*sin(PI*x_coor);
+					}
+					vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false);*/
+
+					//LEVELSET_2D& water_levelset = *eulerian_solver.water_levelset;
+					//GRID_STRUCTURE_2D& water_grid = water_levelset.grid;
+
+					//int N_exact(8000);
+
+					//ARRAY<VT> exact_interface(N_exact);
+
+					//for (int p = 0; p < N_exact; p++)
+					//{
+					//	T pdx = (water_grid.x_max - water_grid.x_min)/(N_exact - 1);
+					//	T x_coor = water_grid.x_min + p*pdx;
+					//	exact_interface[p].x = x_coor;
+					//	exact_interface[p].y = -(T)0.05*sin(PI*x_coor);
+					//}
+					//
+					//int i(0), j(0);
+					//LOOPS_2D(i, j, water_grid.i_start, water_grid.j_start, water_grid.i_end, water_grid.j_end)
+					//{
+					//	T x_coor = water_grid.x_min + i*water_grid.dx, y_coor = water_grid.y_min + j*water_grid.dy;
+					//	
+					//	T min_val = sqrt(POW2(x_coor - exact_interface[0].x) + POW2(y_coor - exact_interface[0].y));
+					//	
+					//	for (int k = 1; k < N_exact; k++)
+					//	{
+					//		T temp = sqrt(POW2(x_coor - exact_interface[k].x) + POW2(y_coor - exact_interface[k].y));
+					//		if (temp <= min_val)
+					//		{
+					//			min_val = temp;
+					//		}
+					//	}
+
+					//	if (y_coor + 0.05*sin(PI*x_coor) <= 0)
+					//	{
+					//		water_levelset(i, j) = -min_val;
+					//	}
+					//	else
+					//	{
+					//		water_levelset(i, j) = min_val;
+					//	}
+					//}
+					//
+					//for (int k = water_levelset.grid.j_start; k <= water_levelset.grid.j_end; k++)
+					//{
+					//	for (int ghost = 1; ghost <= water_levelset.ghost_width; ghost++)
+					//	{
+					//		water_levelset(water_levelset.grid.i_start - ghost, k) = water_levelset(water_levelset.grid.i_end - ghost, k);
+					//		water_levelset(water_levelset.grid.i_end + ghost, k) = water_levelset(water_levelset.grid.i_start + ghost, k);
+					//	}
+					//}
+
+					//for (int k = water_levelset.grid.i_start; k <= water_levelset.grid.i_end; k++)
+					//{
+					//	for (int ghost = 1; ghost <= water_levelset.ghost_width; ghost++)
+					//	{
+					//		water_levelset(k, water_levelset.grid.j_start - ghost) = water_levelset(k, water_levelset.grid.j_end - ghost) - 2;
+					//		water_levelset(k, water_levelset.grid.j_end + ghost) = water_levelset(k, water_levelset.grid.j_start + ghost) + 2;
+					//	}
+					//}
+
+					//LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					//GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					//LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					//{
+					//	vortex_levelset(i, j) = 1;
+					//}
+					//vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false);
 				}
-				vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false);
+				if (test_number == 2)
+				{
+					LEVELSET_2D& water_levelset = *eulerian_solver.water_levelset;
+					GRID_STRUCTURE_2D& water_grid = water_levelset.grid;
+
+					int i(0), j(0);
+					LOOPS_2D(i, j, water_grid.i_start, water_grid.j_start, water_grid.i_end, water_grid.j_end)
+					{
+						T x_coor = water_grid.x_min + i*water_grid.dx, y_coor = water_grid.y_min + j*water_grid.dy;
+						water_levelset(i, j) = y_coor/((T)1 - 0.75*sin(PI*x_coor));
+					}
+
+					// Define Level for drawing
+					water_levelset.epsilon = (T)8*water_levelset.grid.dx;
+
+					for (int k = water_levelset.grid.j_start; k <= water_levelset.grid.j_end; k++)
+					{
+						for (int ghost = 1; ghost <= water_levelset.ghost_width; ghost++)
+						{
+							water_levelset(water_levelset.grid.i_start - ghost, k) = water_levelset(water_levelset.grid.i_end - ghost, k);
+							water_levelset(water_levelset.grid.i_end + ghost, k) = water_levelset(water_levelset.grid.i_start + ghost, k);
+						}
+					}
+
+					for (int k = water_levelset.grid.i_start; k <= water_levelset.grid.i_end; k++)
+					{
+						for (int ghost = 1; ghost <= water_levelset.ghost_width; ghost++)
+						{
+							water_levelset(k, water_levelset.grid.j_start - ghost) = water_levelset(k, water_levelset.grid.j_end - ghost) - 2;
+							water_levelset(k, water_levelset.grid.j_end + ghost) = water_levelset(k, water_levelset.grid.j_start + ghost) + 2;
+						}
+					}
+
+					LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						vortex_levelset(i, j) = 1;
+					}
+					vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false); 
+				
+					/*LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					int i(0), j(0);
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
+						vortex_levelset(i, j) = y_coor + 0.05*sin(PI*x_coor);
+					}
+					vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false);*/
+
+					/*LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					int N_exact(8000);
+
+					ARRAY<VT> exact_interface(N_exact);
+
+					for (int p = 0; p < N_exact; p++)
+					{
+						T pdx = (vortex_grid.x_max - vortex_grid.x_min)/(N_exact - 1);
+						T x_coor = vortex_grid.x_min + p*pdx;
+						exact_interface[p].x = x_coor;
+						exact_interface[p].y = -0.05*sin(PI*x_coor);
+					}
+
+					int i(0), j(0);
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
+						
+						T min_val = sqrt(POW2(x_coor - exact_interface[0].x) + POW2(y_coor - exact_interface[0].y));
+						
+						for (int k = 1; k < N_exact; k++)
+						{
+							T temp = sqrt(POW2(x_coor - exact_interface[k].x) + POW2(y_coor - exact_interface[k].y));
+							if (temp <= min_val)
+							{
+								min_val = temp;
+							}
+						}
+
+						if (y_coor + 0.05*sin(PI*x_coor) <= 0)
+						{
+							vortex_levelset(i, j) = -min_val;
+						}
+						else
+						{
+							vortex_levelset(i, j) = min_val;
+						}
+					}*/
+				}
+
+				if (test_number == 3)
+				{
+					LEVELSET_2D& water_levelset = *eulerian_solver.water_levelset;
+					LEVELSET_2D& second_levelset = *eulerian_solver.second_levelset;
+					GRID_STRUCTURE_2D& water_grid = water_levelset.grid;
+
+					int i(0), j(0);
+					VT x1(-0.5, -0.5), x2(-0.5, 0.5), x3(0.5, 0);
+					T a1(1), a2(2), a3(-3);
+
+					LOOPS_2D(i, j, water_grid.i_start, water_grid.j_start, water_grid.i_end, water_grid.j_end)
+					{
+						T x_coor = water_grid.x_min + i*water_grid.dx, y_coor = water_grid.y_min + j*water_grid.dy;
+						
+						water_levelset(i, j) = MIN(sqrt(POW2(x_coor - x1.x) + POW2(y_coor - x1.y))/a1, sqrt(POW2(x_coor - x2.x) + POW2(y_coor - x2.y))/a2);
+					}
+					
+					LOOPS_2D(i, j, water_grid.i_start, water_grid.j_start, water_grid.i_end, water_grid.j_end)
+					{
+						T x_coor = water_grid.x_min + i*water_grid.dx, y_coor = water_grid.y_min + j*water_grid.dy;
+						
+						second_levelset(i, j) = sqrt(POW2(x_coor - x3.x) + POW2(y_coor - x3.y))/a3;
+					}
+
+					// Define Level for drawing
+					for (int k = water_levelset.grid.j_start; k <= water_levelset.grid.j_end; k++)
+					{
+						for (int ghost = 1; ghost <= water_levelset.ghost_width; ghost++)
+						{
+							water_levelset(water_levelset.grid.i_start - ghost, k) = water_levelset(water_levelset.grid.i_end - ghost, k);
+							water_levelset(water_levelset.grid.i_end + ghost, k) = water_levelset(water_levelset.grid.i_start + ghost, k);
+						}
+					}
+
+					for (int k = water_levelset.grid.i_start; k <= water_levelset.grid.i_end; k++)
+					{
+						for (int ghost = 1; ghost <= water_levelset.ghost_width; ghost++)
+						{
+							water_levelset(k, water_levelset.grid.j_start - ghost) = water_levelset(k, water_levelset.grid.j_end - ghost) - 2;
+							water_levelset(k, water_levelset.grid.j_end + ghost) = water_levelset(k, water_levelset.grid.j_start + ghost) + 2;
+						}
+					}
+
+					LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						vortex_levelset(i, j) = 1;
+					}
+					vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false); 
+				
+					/*LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					int i(0), j(0);
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
+						vortex_levelset(i, j) = y_coor + 0.05*sin(PI*x_coor);
+					}
+					vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false);*/
+
+					/*LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					int N_exact(8000);
+
+					ARRAY<VT> exact_interface(N_exact);
+
+					for (int p = 0; p < N_exact; p++)
+					{
+						T pdx = (vortex_grid.x_max - vortex_grid.x_min)/(N_exact - 1);
+						T x_coor = vortex_grid.x_min + p*pdx;
+						exact_interface[p].x = x_coor;
+						exact_interface[p].y = -0.05*sin(PI*x_coor);
+					}
+
+					int i(0), j(0);
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
+						
+						T min_val = sqrt(POW2(x_coor - exact_interface[0].x) + POW2(y_coor - exact_interface[0].y));
+						
+						for (int k = 1; k < N_exact; k++)
+						{
+							T temp = sqrt(POW2(x_coor - exact_interface[k].x) + POW2(y_coor - exact_interface[k].y));
+							if (temp <= min_val)
+							{
+								min_val = temp;
+							}
+						}
+
+						if (y_coor + 0.05*sin(PI*x_coor) <= 0)
+						{
+							vortex_levelset(i, j) = -min_val;
+						}
+						else
+						{
+							vortex_levelset(i, j) = min_val;
+						}
+					}*/
+				}
 			}
 		}
 		else if (numerical_test_solver)
@@ -667,7 +981,15 @@ public: // Initialization Functions
 	{
 		BEGIN_HEAD_THREAD_WORK
 		{
-			dt = DetermineTimeStep()*CFL;
+			if (vortex_sheet_problem)
+			{
+				dt = DetermineTimeStep()*CFL;
+			}
+			else
+			{
+				dt = DetermineTimeStep()*CFL;
+			}
+			
 			accu_dt += dt;
 			cout << "Max x-velocity   : " << eulerian_solver.water_projection->max_velocity_x << endl;
 			cout << "Max y-velocity   : " << eulerian_solver.water_projection->max_velocity_y << endl;
@@ -694,7 +1016,15 @@ public: // Initialization Functions
 
 	void AdvanceOneFrame()
 	{
-		eulerian_solver.water_levelset->ComputeCurvaturesThreaded();
+		if (vortex_sheet_problem)
+		{
+			eulerian_solver.vortex_levelset->ComputeCurvaturesThreaded();
+		}
+		else
+		{
+			eulerian_solver.water_levelset->ComputeCurvaturesThreaded();
+		}
+
 		multithreading->RunThreads(&SIMULATION_WORLD::AdvanceOneFrameThread, this);
 		num_current_frame++;
 	}
@@ -753,6 +1083,11 @@ public: // Initialization Functions
 
 		dt_for_this = eulerian_solver.CFLOneTimeStep();
 		
+		if (dt_for_this == 0)
+		{
+			dt_for_this = dt;
+		}
+
 		return dt_for_this;
 	}
 };

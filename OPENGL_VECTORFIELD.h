@@ -19,13 +19,12 @@ public: // Enumerates
 		VECTORFIELD_DRAW_SHOW  ,
 		VECTORFIELD_DRAW_SHOW_X,
 		VECTORFIELD_DRAW_SHOW_Y,
+		VECTORFIELD_DRAW_SHOW_MAC,
 		VECTORFIELD_DRAW_MAP
 	};
 
 public: // Essential Data
 	FIELD_STRUCTURE_2D<VT>*			vector_field;
-	
-	FIELD_STRUCTURE_2D<T>*			vector_field_mac;
 	
 	FIELD_STRUCTURE_2D<T>*			vector_field_x;
 	FIELD_STRUCTURE_2D<T>*			vector_field_y;
@@ -43,7 +42,7 @@ public: // Essential Data
 
 public: // Constructor and Destructor
 	OPENGL_VECTORFIELD(const char* display_name, OPENGL_DRIVER* driver, FIELD_STRUCTURE_2D<VT>* vector_field_input)
-		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_mac(0), vector_field_x(0), vector_field_y(0), grid(vector_field_input->grid), length_scale(1.0), x_offset(0), y_offset(0)
+		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_x(0), vector_field_y(0), grid(vector_field_input->grid), length_scale(1.0), x_offset(0), y_offset(0)
 	{
 		count_object_for_name++;
 		name_base = count_object_for_name*NAME_BASE;
@@ -52,6 +51,7 @@ public: // Constructor and Destructor
 		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW  , "DRAW (-,+,/,*)");
 		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW_X, "DRAW_X (-,+,/,*)");
 		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW_Y, "DRAW_Y (-,+,/,*)");
+		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW_MAC, "DRAW_Y (-,+,/,*)");
 		RegisterDrawType((int) VECTORFIELD_DRAW_MAP, "DRAW_MAP (-,+,/,*)");
 		
 		SetDrawType((int) VECTORFIELD_HIDE);
@@ -73,7 +73,7 @@ public: // Constructor and Destructor
 	}
 
 	OPENGL_VECTORFIELD(const char* display_name, OPENGL_DRIVER* driver, FIELD_STRUCTURE_2D<VT>* vector_field_input, FIELD_STRUCTURE_2D<T>* vector_field_mac_input)
-		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_mac(vector_field_mac_input), vector_field_x(0), vector_field_y(0), length_scale(1.0), grid(vector_field->grid), x_offset(0), y_offset(0)
+		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_x(0), vector_field_y(0), length_scale(1.0), grid(vector_field->grid), x_offset(0), y_offset(0)
 	{
 		count_object_for_name++;
 		name_base = count_object_for_name*NAME_BASE;
@@ -82,6 +82,7 @@ public: // Constructor and Destructor
 		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW  , "DRAW (-,+,/,*)");
 		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW_X, "DRAW_X (-,+,/,*)");
 		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW_Y, "DRAW_Y (-,+,/,*)");
+		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW_MAC, "DRAW_Y (-,+,/,*)");
 		SetDrawType((int) VECTORFIELD_HIDE);
 
 		for (int i = 0; i < FIELD_NUM; i++)
@@ -96,34 +97,18 @@ public: // Constructor and Destructor
 		// x-component
 		if (i_res > j_res)
 		{
-			min[FIELD_X] = vector_field_mac->i_start_g;
-			max[FIELD_X] = vector_field_mac->i_end_g;
-			index[FIELD_X] = (min[FIELD_X] + max[FIELD_X])/2;
-
-			min[FIELD_Y] = vector_field_mac->j_start_g;
-			max[FIELD_Y] = vector_field_mac->j_end_g;
-			index[FIELD_Y] = (min[FIELD_Y] + max[FIELD_Y])/2;
-
 			is_velocity_x = true;
 		}		
 			
 		// y-component
 		if (j_res > i_res)
 		{
-			min[FIELD_X] = vector_field_mac->i_start_g;
-			max[FIELD_X] = vector_field_mac->i_end_g;
-			index[FIELD_X] = (min[FIELD_X] + max[FIELD_X])/2;
-
-			min[FIELD_Y] = vector_field_mac->j_start_g;
-			max[FIELD_Y] = vector_field_mac->j_end_g;
-			index[FIELD_Y] = (min[FIELD_Y] + max[FIELD_Y])/2;
-
 			is_velocity_y = true;
 		}
 	}
 
 	OPENGL_VECTORFIELD(const char* display_name, OPENGL_DRIVER* driver, FIELD_STRUCTURE_2D<VT>* vector_field_input, FIELD_STRUCTURE_2D<T>* vector_field_x_input, FIELD_STRUCTURE_2D<T>* vector_field_y_input)
-		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_mac(0), vector_field_x(vector_field_x_input), vector_field_y(vector_field_y_input), length_scale(1.0), grid(vector_field->grid), x_offset(0), y_offset(0)
+		: OPENGL_OBJECT_BASE(display_name, driver), vector_field(vector_field_input), vector_field_x(vector_field_x_input), vector_field_y(vector_field_y_input), length_scale(1.0), grid(vector_field->grid), x_offset(0), y_offset(0)
 	{
 		count_object_for_name++;
 		name_base = count_object_for_name*NAME_BASE;
@@ -132,6 +117,7 @@ public: // Constructor and Destructor
 		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW  , "DRAW (-,+,/,*)");
 		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW_X, "DRAW_X (-,+,/,*)");
 		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW_Y, "DRAW_Y (-,+,/,*)");
+		RegisterDrawType((int) VECTORFIELD_DRAW_SHOW_MAC, "DRAW_Y (-,+,/,*)");
 		SetDrawType((int) VECTORFIELD_HIDE);
 
 		for (int i = 0; i < FIELD_NUM; i++)
@@ -257,7 +243,7 @@ public: // Initialization Function
 
 		LOOPS_2D(i, j, index[FIELD_X], min[FIELD_Y], index[FIELD_X], max[FIELD_Y])
 		{
-			T& x_component = vector_field_mac->array_for_this(i, j);
+			T& x_component = vector_field_x->array_for_this(i, j);
 			VT& vec_x = VT(x_component, 0);
 			VT& ces = (VT)grid.CellCenter(i, j);
 			name_cell = name_base + count_cell;
@@ -276,7 +262,7 @@ public: // Initialization Function
 
 		LOOPS_2D(i, j, min[FIELD_X], index[FIELD_Y], max[FIELD_X], index[FIELD_Y])
 		{
-			T& y_component = vector_field_mac->array_for_this(i, j);
+			T& y_component = vector_field_y->array_for_this(i, j);
 			VT& vec_y = VT(0, y_component);
 			VT& ces = (VT)grid.CellCenter(i, j);
 			name_cell = name_base + count_cell;
@@ -287,7 +273,7 @@ public: // Initialization Function
 		}
 	}
 	
-	void RenderField(bool draw_with_name = false)
+	void RenderFieldMAC(bool draw_with_name = false)
 	{
 		int i, j;
 		int count_cell = 0;
@@ -314,6 +300,45 @@ public: // Initialization Function
 		{
 			T average_x = (T)0.5*(vector_field_x->array_for_this(i, j) + vector_field_x->array_for_this(i + 1, j));
 			T average_y = (T)0.5*(vector_field_y->array_for_this(i, j) + vector_field_y->array_for_this(i, j + 1));
+			T& x_component = average_x;
+			T& y_component = average_y;
+			VT& vec = VT(x_component, y_component);
+			VT& ces = (VT)grid.CellCenter(i, j);
+			name_cell = name_base + count_cell;
+
+			DrawLine(VI(i, j), ces, vec, name_cell, draw_with_name);
+
+			count_cell++;
+		}
+	}
+
+	void RenderField(bool draw_with_name = false)
+	{
+		int i, j;
+		int count_cell = 0;
+		int name_cell = -1;
+
+		for (int i = min[FIELD_X]; i <= max[FIELD_X]; i++)
+		{
+			for (int j = min[FIELD_Y]; j <= max[FIELD_X]; j++)
+			{
+				T average_x = (T)0.5*(vector_field->array_for_this(i, j).x + vector_field->array_for_this(i + 1, j).x);
+				T average_y = (T)0.5*(vector_field->array_for_this(i, j).y + vector_field->array_for_this(i, j + 1).y);
+				T mag = sqrt(POW2(average_x) + POW2(average_y));
+				
+				if (mag >= length_scale)
+				{
+					length_scale = mag;
+				}
+			}
+		}
+
+		length_scale = (T)sqrt(2)*vector_field->dx/length_scale;
+		
+		LOOPS_2D(i, j, min[FIELD_X], min[FIELD_Y], max[FIELD_X], max[FIELD_Y])
+		{
+			T average_x = (T)0.5*(vector_field->array_for_this(i, j).x + vector_field->array_for_this(i + 1, j).x);
+			T average_y = (T)0.5*(vector_field->array_for_this(i, j).y + vector_field->array_for_this(i, j + 1).y);
 			T& x_component = average_x;
 			T& y_component = average_y;
 			VT& vec = VT(x_component, y_component);
@@ -528,6 +553,9 @@ public: // Virtual Functions
 			break;
 		case VECTORFIELD_DRAW_SHOW_Y:
 			RenderYField();
+			break;
+		case VECTORFIELD_DRAW_SHOW_MAC:
+			RenderFieldMAC();
 			break;
 		case VECTORFIELD_DRAW_MAP:
 			RenderMap();

@@ -18,22 +18,63 @@ public: // Essential Data
 	EULERIAN_FLUID_SOLVER_2D*		eulerian_solver;
 
 	OPENGL_LEVELSET*				water_levelset;
-	
+	OPENGL_LEVELSET*				vortex_levelset;
+
 	OPENGL_SCALARFIELD*				pressure_field;
 	OPENGL_VECTORFIELD*				velocity_field;
 	
 
 public: // Constructor and Destructor
 	OPENGL_EULERIAN_FLUID_SOLVER(OPENGL_DRIVER* driver_input, EULERIAN_FLUID_SOLVER_2D* eulerian_object, MULTITHREADING* multithreading_input, float grid_scale)
-		: driver(driver_input), eulerian_solver(eulerian_object), water_levelset(0), velocity_field(0), pressure_field(0)
+		: driver(driver_input), eulerian_solver(eulerian_object), water_levelset(0), vortex_levelset(0), velocity_field(0), pressure_field(0)
 	{
-		water_levelset = new OPENGL_LEVELSET("EULERIAN_WATER_LEVELSET", driver, eulerian_solver->water_levelset, multithreading_input, grid_scale);
-		AddObject(water_levelset);
+		if (eulerian_solver->vortex_sheet_problem == true && eulerian_solver->test_number == 3)
+		{
+			water_levelset = new OPENGL_LEVELSET("EULERIAN_WATER_LEVELSET", driver, eulerian_solver->water_levelset, eulerian_solver->second_levelset, multithreading_input, grid_scale);
+			AddObject(water_levelset);
+		}
+		else
+		{
+			water_levelset = new OPENGL_LEVELSET("EULERIAN_WATER_LEVELSET", driver, eulerian_solver->water_levelset, multithreading_input, grid_scale);
+			AddObject(water_levelset);
+		}
+				
+		if (eulerian_solver->vortex_sheet_problem)
+		{
+			if (eulerian_solver->test_number == 2)
+			{
+				water_levelset->SetDrawType(OPENGL_LEVELSET::LEVELSET_DRAW_WIRE_DOUBLE);
+			}
+			if (eulerian_solver->test_number == 3)
+			{
+				water_levelset->SetDrawType(OPENGL_LEVELSET::LEVELSET_DRAW_WIRE_ARRAY);
+				water_levelset->SetLengthForDrawingObject(10);
+				water_levelset->SetMinMaxLevelForDrawing(0, 0.04);
+			}
+		}
 
+		/*if (eulerian_solver->vortex_sheet_problem)
+		{
+			vortex_levelset = new OPENGL_LEVELSET("VORTEX_WATER_LEVELSET", driver, eulerian_solver->vortex_levelset, multithreading_input, grid_scale);
+			AddObject(vortex_levelset);
+		}
+		else
+		{
+			water_levelset = new OPENGL_LEVELSET("EULERIAN_WATER_LEVELSET", driver, eulerian_solver->water_levelset, multithreading_input, grid_scale);
+			AddObject(water_levelset);
+		}*/
+		
 		velocity_field = new OPENGL_VECTORFIELD("VELOCITY_FIELD", driver, eulerian_solver->water_velocity_field, eulerian_solver->water_velocity_field_mac_x, eulerian_solver->water_velocity_field_mac_y);
 		AddObject(velocity_field);
-		velocity_field->SetDrawType(OPENGL_VECTORFIELD::VECTORFIELD_DRAW_SHOW);
-		
+		if (eulerian_solver->vortex_sheet_problem)
+		{
+			velocity_field->SetDrawType(OPENGL_VECTORFIELD::VECTORFIELD_DRAW_SHOW);
+		}
+		else
+		{
+			velocity_field->SetDrawType(OPENGL_VECTORFIELD::VECTORFIELD_DRAW_SHOW_MAC);
+		}
+				
 		pressure_field = new OPENGL_SCALARFIELD("PRESSURE_FIELD", driver, &eulerian_solver->water_projection->pressure_field);
 		AddObject(pressure_field);
 		pressure_field->SetDrawType(OPENGL_SCALARFIELD::SCALARFIELD_DRAW_SHOW);
