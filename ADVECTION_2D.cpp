@@ -378,6 +378,40 @@ void ADVECTION_2D::Solve_Vortex(const T& dt, const int& thread_id)
 	}
 }
 
+void ADVECTION_2D::Solve_Vortex_In_Stream_Function_Formulation(const T& dt, const int& thread_id)
+{
+	// Water Levelset Advection with MAC Grid
+	if (use_5th_weno)
+	{
+		// Boundary Condition
+		scalar_field_ghost.FillGhostCellsFrom(vortex_signed_distance_field.array_for_this, true);
+
+		for (int k = scalar_field_ghost.j_start; k <= scalar_field_ghost.j_end; k++)
+		{
+			for (int ghost = 1; ghost <= scalar_field_ghost.ghost_width; ghost++)
+			{
+				scalar_field_ghost(scalar_field_ghost.i_start - ghost, k) = scalar_field_ghost(scalar_field_ghost.i_end - ghost, k);
+				scalar_field_ghost(scalar_field_ghost.i_end + ghost, k) = scalar_field_ghost(scalar_field_ghost.i_start + ghost, k);
+			}
+		}
+
+		for (int k = scalar_field_ghost.i_start; k <= scalar_field_ghost.i_end; k++)
+		{
+			for (int ghost = 1; ghost <= scalar_field_ghost.ghost_width; ghost++)
+			{
+				scalar_field_ghost(k, scalar_field_ghost.j_start - ghost) = scalar_field_ghost(k, scalar_field_ghost.j_end - ghost);
+				scalar_field_ghost(k, scalar_field_ghost.j_end + ghost) = scalar_field_ghost(k, scalar_field_ghost.j_start + ghost);
+			}
+		}
+
+		ADVECTION_METHOD_2D<T>::WENO5thForStreamFunctionFormulation(vortex_signed_distance_field, scalar_field_ghost, vector_field_ghost, dt, epsilon);
+	}
+	if (use_3rd_eno)
+	{
+		ADVECTION_METHOD_2D<T>::ENO3rd(vortex_signed_distance_field, scalar_field_ghost, velocity_field_mac_ghost_x, velocity_field_mac_ghost_y, dt, multithreading, thread_id);
+	}
+}
+
 void ADVECTION_2D::ReinitializationBySussman(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function)
 {
 	ADVECTION_METHOD_2D<T>::WENO5thReinitialization(water_signed_distance_field, scalar_field_ghost, dt, epsilon, sign_function); 
@@ -388,11 +422,10 @@ void ADVECTION_2D::ReinitializationBySussman(const T& dt, FIELD_STRUCTURE_2D<T>&
 
 void ADVECTION_2D::ReinitializationBySussman(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function, const int& thread_id)
 {
-	scalar_field_ghost.FillGhostCellsFrom(water_signed_distance_field.array_for_this, true, thread_id);
+	//scalar_field_ghost.FillGhostCellsContinuousDerivativesFrom(water_signed_distance_field.array_for_this, true, thread_id);
 	ADVECTION_METHOD_2D<T>::WENO5thReinitialization(water_signed_distance_field, scalar_field_ghost, dt, epsilon, sign_function, multithreading, thread_id); 
 	//ADVECTION_METHOD_2D<T>::GodunovReinitialization(water_signed_distance_field, scalar_field_ghost, dt, epsilon, sign_function, phi_0); 
 	//ADVECTION_METHOD_2D<T>::SubcellFixedReinitialization(water_signed_distance_field, scalar_field_ghost, dt, epsilon, sign_function, phi_0); 
-	water_levelset.FillGhostCellsContinuousDerivativesFrom(water_levelset.arr, true);
 }
 
 void ADVECTION_2D::ReinitializationBySussmanForVortex(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function, const int& thread_id)

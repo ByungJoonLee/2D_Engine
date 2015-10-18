@@ -83,7 +83,8 @@ public: // Solver
 	
 	void Solve_Vortex(const T& dt);
 	void Solve_Vortex(const T& dt, const int& thread_id);
-	
+	void Solve_Vortex_In_Stream_Function_Formulation(const T& dt, const int& thread_id);
+
 	void ReinitializationBySussman(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function);
 	void ReinitializationBySussman(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function, const int& thread_id);
 	void ReinitializationBySussmanForVortex(const T& dt, FIELD_STRUCTURE_2D<T>& sign_function, const int& thread_id);

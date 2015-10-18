@@ -21,10 +21,12 @@ void POISSON_SOLVER::InitializeLinearSolver(const POISSON_SOLVER_TYPE linear_sol
 	{
 	case CG:
 		linear_solver = new CG_METHOD();
+		solver_type = linear_solver_type;
 		break;
 		
 	case PCG:
 		linear_solver = new PCG_METHOD();
+		solver_type = linear_solver_type;
 		break;
 		
 	case NO_SOLVER:
@@ -81,10 +83,11 @@ void POISSON_SOLVER::Solve(FIELD_STRUCTURE_1D<T>& pressure, FIELD_STRUCTURE_1D<T
 	//BuildLinearSystemNodeDirichlet(A, x, b, pressure, bc, div);	
 
    	//BuildLinearSystemNodeJumpCondition(A, x, b, pressure, bc, div, levelset, jc_on_solution, jc_on_derivative);
-		
+	
 	BuildLinearSystemNodeJumpConditionVaribleCoefficient(A, x, b, pressure, variable, bc, div, levelset, jc_on_solution, jc_on_derivative, thread_id);
-		
+	
 	linear_solver->Solve(A, x, b, bc, thread_id);
+		
 	VectorToGrid(x, pressure, bc, thread_id);
 }
 
@@ -123,14 +126,6 @@ void POISSON_SOLVER::Solve(FIELD_STRUCTURE_2D<T>& pressure, FIELD_STRUCTURE_2D<T
 
 	BuildLinearSystemNodeJumpConditionVaribleCoefficient(A, x, b, pressure, one_over_density, bc, div, levelset, jc_on_solution, jc_on_derivative);
 	
-	ofstream fout;
-	fout.open("Matrix_Test");
-	for (int i = 0; i < A.nz; i++)
-	{
-		fout << A.values[i] << endl;
-	}
-	fout.close();
-
 	linear_solver->Solve(A, x, b, bc);
 		
 	VectorToGrid(x, pressure, bc);
@@ -145,9 +140,22 @@ void POISSON_SOLVER::Solve(FIELD_STRUCTURE_2D<T>& pressure, FIELD_STRUCTURE_2D<T
    	//BuildLinearSystemNodeJumpCondition(A, x, b, pressure, bc, div, levelset, jc_on_solution, jc_on_derivative);
 		
 	BuildLinearSystemNodeJumpConditionVaribleCoefficient(A, x, b, pressure, variable, bc, div, levelset, jc_on_solution, jc_on_derivative, thread_id);
-		
+
+	if (solver_type == PCG)
+	{
+		BEGIN_HEAD_THREAD_WORK
+		{
+			linear_solver->Solve(A, x, b, bc);
+		}
+		END_HEAD_THREAD_WORK;
+	}
+	else
+	{
+		linear_solver->Solve(A, x, b, bc, thread_id);
+	}
+
 	// Need to be modified for using multithreading
-	linear_solver->Solve(A, x, b, bc, thread_id);
+	//linear_solver->Solve(A, x, b, bc, thread_id);
 	VectorToGrid(x, pressure, bc, thread_id);
 }
 
@@ -1148,6 +1156,8 @@ void POISSON_SOLVER::BuildLinearSystemNodeJumpConditionVaribleCoefficient(CSR_MA
 
 	const T dxdx = POW2(pressure.grid.dx), inv_dxdx = (T)1/dxdx, dydy = POW2(pressure.grid.dy), inv_dydy = (T)1/dydy;
 		
+	int i_start_for_domain(0), j_start_for_domain(0);
+
 	BEGIN_GRID_ITERATION_2D(pressure.partial_grids[thread_id])
 	{
 		if (bc(i, j) < 0)
@@ -1207,7 +1217,14 @@ void POISSON_SOLVER::BuildLinearSystemNodeJumpConditionVaribleCoefficient(CSR_MA
 		}
 			
 		// Neumann Boudary Condition
-		if ((i == i_start) && (j == j_start))
+		// For saving starting index of the given domain
+		if (bc(i, j) == 0)
+		{
+			i_start_for_domain = i;
+			j_start_for_domain = j;
+		}
+
+		if ((thread_id == 0) && (i == i_start) && (j == j_start))
 		{
 			if (bc(i - 1, j) == BC_NEUM)
 			{

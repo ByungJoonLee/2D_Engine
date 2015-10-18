@@ -948,7 +948,7 @@ public: // Member Functions
 						
 				T magnitude = sqrt(POW2(px) + POW2(py));
 				T deno = POW3(magnitude);
-						
+				
 				T curv(0);
 	
 				if (deno != 0)

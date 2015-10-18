@@ -117,6 +117,10 @@ public: // Initialization Functions
 			{
 				test_number = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").FindBlock("VORTEX_SHEET_PROBLEM_TEST_NUMBER").GetInteger("test_number", (int)1);
 			}
+			if (bifurcation_test)
+			{
+				test_number = script_block_for_this.FindBlock("FLUID_SOLVER_OPTIONS").FindBlock("BIFURCATION_TEST_NUMBER").GetInteger("test_number", (int)1);
+			}
 		}
 		if (numerical_test_solver)
 		{
@@ -350,6 +354,7 @@ public: // Initialization Functions
 			}
 			if (bifurcation_test)
 			{
+				eulerian_solver.test_number = test_number;
 				eulerian_solver.bifurcation_test = bifurcation_test;
 				eulerian_solver.InitializeFromScriptBlock(world_discretization.world_grid, script_reader.FindBlock("FLUID_SOLVER_UNIFORM").FindBlock("BIFURCATION_TEST"), multithreading);
 			}
@@ -739,6 +744,115 @@ public: // Initialization Functions
 					}*/
 				}
 			}
+
+			if (bifurcation_test)
+			{
+				if (test_number == 1)
+				{
+					LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					int i(0), j(0);
+
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
+						
+						T f_0 = (T)1/6*(cos(2*(x_coor + y_coor)) - 16*cos(x_coor + y_coor));
+						T F_1 = 4*cos(x_coor) - cos(2*x_coor);
+						T F_2 = 15*cos(x_coor) - 6*cos(2*x_coor) + cos(3*x_coor);
+						T F_3 = 5*sin(x_coor) - 4*sin(2*x_coor) + sin(3*x_coor);
+						T F_4 = 5*sin(y_coor) - 4*sin(2*y_coor) + sin(3*y_coor);
+
+						T a = 7, b = -10, eta = 1e-6; 
+						T d = a, c = (-1 + (T)493/2716*a)*a + eta;
+
+						T f_0_xx = (T)1/6*(-4*cos(2*(x_coor + y_coor)) + 16*cos(x_coor + y_coor));
+						T f_0_yy = (T)1/6*(-4*cos(2*(x_coor + y_coor)) + 16*cos(x_coor + y_coor));
+						T F_1_xx = -4*cos(x_coor) + 4*cos(2*x_coor);
+						T F_1_yy = 0;
+						T F_2_xx = -15*cos(x_coor) + 24*cos(2*x_coor) - 9*cos(3*x_coor);
+						T F_2_yy = 0;
+						T F_3_xx = -5*sin(x_coor) + 16*sin(2*x_coor) - 9*sin(3*x_coor);
+						T F_3_yy = 0;
+						T F_4_xx = 0;
+						T F_4_yy = -5*sin(y_coor) + 16*sin(2*y_coor) - 9*sin(3*y_coor);
+
+						vortex_levelset(i, j) = (f_0_xx + f_0_yy) + a*(F_1_xx + F_1_yy) + b*(F_2_xx + F_2_yy) + c*(F_3_xx + F_3_yy) + d*(F_4_xx + F_4_yy);
+					}
+					vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false); 
+				}
+
+				if (test_number == 2)
+				{
+					LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					int i(0), j(0);
+
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
+						
+						T f_0 = (T)1/6*(cos(2*(x_coor + y_coor)) - 16*cos(x_coor + y_coor));
+						T F_1 = 4*cos(x_coor) - cos(2*x_coor);
+						T F_2 = 15*cos(x_coor) - 6*cos(2*x_coor) + cos(3*x_coor);
+						T F_3 = 5*sin(x_coor) - 4*sin(2*x_coor) + sin(3*x_coor);
+						T F_4 = 5*sin(y_coor) - 4*sin(2*y_coor) + sin(3*y_coor);
+
+						T a = 7, b = -10, eta = 0, eta_tilde = 1e-6; 
+						T d = a, c = (-1 + (T)493/2716*a)*a + eta;
+
+						T f_0_xx = (T)1/6*(-4*cos(2*(x_coor + y_coor)) + 16*cos(x_coor + y_coor));
+						T f_0_yy = (T)1/6*(-4*cos(2*(x_coor + y_coor)) + 16*cos(x_coor + y_coor));
+						T F_1_xx = -4*cos(x_coor) + 4*cos(2*x_coor);
+						T F_1_yy = 0;
+						T F_2_xx = -15*cos(x_coor) + 24*cos(2*x_coor) - 9*cos(3*x_coor);
+						T F_2_yy = 0;
+						T F_3_xx = -5*sin(x_coor) + 16*sin(2*x_coor) - 9*sin(3*x_coor);
+						T F_3_yy = 0;
+						T F_4_xx = 0;
+						T F_4_yy = -5*sin(y_coor) + 16*sin(2*y_coor) - 9*sin(3*y_coor);
+
+
+						vortex_levelset(i, j) = (f_0_xx + f_0_yy) + a*(F_1_xx + F_1_yy) + b*(F_2_xx + F_2_yy) + c*(F_3_xx + F_3_yy) + d*(F_4_xx + F_4_yy) - eta_tilde*(F_3_xx + F_3_yy);
+					}
+					vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false); 
+				}
+
+				if (test_number == 3)
+				{
+					LEVELSET_2D& vortex_levelset = *eulerian_solver.vortex_levelset;
+					GRID_STRUCTURE_2D& vortex_grid = vortex_levelset.grid;
+
+					int i(0), j(0);
+
+					LOOPS_2D(i, j, vortex_grid.i_start, vortex_grid.j_start, vortex_grid.i_end, vortex_grid.j_end)
+					{
+						T x_coor = vortex_grid.x_min + i*vortex_grid.dx, y_coor = vortex_grid.y_min + j*vortex_grid.dy;
+						
+						T f_0 = -2*cos(x_coor + y_coor);
+						T F_1 = sin(2*x_coor) - 2*sin(x_coor);
+						T F_2 = 5*sin(x_coor) - 4*sin(2*x_coor) + sin(3*x_coor);
+						T F_3 = 8*sin(y_coor) - sin(2*y_coor);
+						
+						T a = 1, b = 10, epsilon = 1e-6; 
+						T c = (T)epsilon/6;
+
+						T f_0_xx = (T)2*cos(x_coor + y_coor);
+						T f_0_yy = (T)2*cos(x_coor + y_coor);
+						T F_1_xx = -2*sin(2*x_coor) + 2*sin(x_coor);
+						T F_1_yy = 0;
+						T F_2_xx = -5*sin(x_coor) + 16*sin(2*x_coor) - 9*sin(3*x_coor);
+						T F_2_yy = 0;
+						T F_3_xx = 0;
+						T F_3_yy = -8*sin(y_coor) + 4*sin(2*y_coor);
+						
+						vortex_levelset(i, j) = (f_0_xx + f_0_yy) + a*(F_1_xx + F_1_yy) + b*(F_2_xx + F_2_yy) + c*(F_3_xx + F_3_yy);
+					}
+					vortex_levelset.FillGhostCellsFromThreaded(&(vortex_levelset.phi), false); 
+				}
+			}
 		}
 		else if (numerical_test_solver)
 		{
@@ -981,15 +1095,8 @@ public: // Initialization Functions
 	{
 		BEGIN_HEAD_THREAD_WORK
 		{
-			if (vortex_sheet_problem)
-			{
-				dt = DetermineTimeStep()*CFL;
-			}
-			else
-			{
-				dt = DetermineTimeStep()*CFL;
-			}
-			
+			dt = DetermineTimeStep()*CFL;
+						
 			accu_dt += dt;
 			cout << "Max x-velocity   : " << eulerian_solver.water_projection->max_velocity_x << endl;
 			cout << "Max y-velocity   : " << eulerian_solver.water_projection->max_velocity_y << endl;
@@ -1016,14 +1123,22 @@ public: // Initialization Functions
 
 	void AdvanceOneFrame()
 	{
-		if (vortex_sheet_problem)
+		if (air_water_simulation)
+		{
+			eulerian_solver.water_levelset->ComputeCurvaturesThreaded();
+		}
+		/*if (vortex_sheet_problem)
 		{
 			eulerian_solver.vortex_levelset->ComputeCurvaturesThreaded();
+		}
+		else if (bifurcation_test)
+		{
+			
 		}
 		else
 		{
 			eulerian_solver.water_levelset->ComputeCurvaturesThreaded();
-		}
+		}*/
 
 		multithreading->RunThreads(&SIMULATION_WORLD::AdvanceOneFrameThread, this);
 		num_current_frame++;

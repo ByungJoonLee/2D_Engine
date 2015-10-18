@@ -40,6 +40,9 @@ public: // For 2D problem
 	FIELD_STRUCTURE_2D<T>		jc_on_solution_2d;
 	FIELD_STRUCTURE_2D<T>		jc_on_derivative_2d;
 
+	// Reference Solution
+	FIELD_STRUCTURE_2D<T>		true_solution_2d;
+
 public: // Poisson Solver
 	POISSON_SOLVER				poisson_solver;
 
@@ -67,6 +70,9 @@ public: // Options for dimension
 	
 public: // Example number
 	int							test_number;
+
+public: // Error Norm
+	T							l2_norm, max_norm;
 
 public: // Constructor and Destructor
 	POISSON_EQUATION_TEST(void)
@@ -185,7 +191,8 @@ public: // Initialization Function
 			boundary_condition_2d.Initialize(base_grid_2d, 1, multithreading);
 			rhs_2d.Initialize(base_grid_2d, 1, multithreading);
 			beta_2d.Initialize(base_grid_2d, 1, multithreading);
-			
+			true_solution_2d.Initialize(base_grid_2d, 1, multithreading);
+
 			// Assigning initial field values
 			beta_2d.array_for_this.AssignAllValues((T)1);
 			
@@ -207,10 +214,36 @@ public: // Initialization Function
 public: // Solver
 	void Solve(const int& thread_id)
 	{
+		AssignTrueSolution(thread_id);
 		SetupRHS(thread_id);
 		SetupBeta(thread_id);
 		SetupJumpCondition(thread_id);
 		DetermineSolution(thread_id);
+		ComputeErrorInL2Norm(thread_id);
+		
+		BEGIN_HEAD_THREAD_WORK
+		{
+			if (test_number == 0)
+			{
+				cout << "L2 norm: " << l2_norm << endl;
+			}
+		}
+		END_HEAD_THREAD_WORK;
+		//ComputeErrorInMaxNorm(thread_id);
+	}
+
+	void AssignTrueSolution(const int& thread_id)
+	{
+		if (test_number == 0)
+		{
+			BEGIN_GRID_ITERATION_2D(true_solution_2d.partial_grids_ghost[thread_id])
+			{
+				T x_coor = true_solution_2d.x_min + i*true_solution_2d.dx, y_coor = true_solution_2d.y_min + j*true_solution_2d.dy;
+
+				true_solution_2d(i, j) = (T)1/POW2(PI)*sin(PI*x_coor)*sin(PI*y_coor);
+			}
+			END_GRID_ITERATION_2D;
+		}
 	}
 
 	void DetermineSolution(const int& thread_id)
@@ -228,13 +261,30 @@ public: // Solver
 			beta_2d.FillGhostCellsFrom(beta_2d.array_for_this, false, thread_id);
 			multithreading->Sync(thread_id);
 			
-			poisson_solver.Solve(solution_2d,beta_2d, boundary_condition_2d, rhs_2d, *interface_levelset_2d, jc_on_solution_2d, jc_on_derivative_2d);
+			if (test_number == 0)
+			{
+				poisson_solver.Solve(solution_2d, boundary_condition_2d, rhs_2d, thread_id);
+			}
+			else
+			{
+				poisson_solver.Solve(solution_2d,beta_2d, boundary_condition_2d, rhs_2d, *interface_levelset_2d, jc_on_solution_2d, jc_on_derivative_2d);
+			}
+			
 			//poisson_solver.Solve(solution_2d, beta_2d, boundary_condition_2d, rhs_2d, beta_2d, *interface_levelset_2d, jc_on_solution_2d, jc_on_derivative_2d, thread_id);
 		}
 	}
 
 	void SetupBeta(const int& thread_id)
 	{
+		if (test_number == 0)
+		{
+			BEGIN_GRID_ITERATION_2D(beta_2d.partial_grids[thread_id])
+			{
+				beta_2d(i, j) = (T)1;
+			}
+			END_GRID_ITERATION_2D;
+		}
+
 		if (test_number == 1)
 		{
 			BEGIN_GRID_ITERATION_1D(beta_1d.partial_grids[thread_id])
@@ -295,6 +345,21 @@ public: // Solver
 
 	void SetupJumpCondition(const int& thread_id)
 	{
+		if (test_number == 0)
+		{
+			BEGIN_GRID_ITERATION_2D(jc_on_solution_2d.partial_grids[thread_id])
+			{
+				jc_on_solution_2d(i, j) = (T)0;
+			}
+			END_GRID_ITERATION_2D;
+
+			BEGIN_GRID_ITERATION_2D(jc_on_solution_2d.partial_grids[thread_id])
+			{
+				jc_on_derivative_2d(i, j) = (T)0;
+			}
+			END_GRID_ITERATION_2D;
+		}
+
 		if (test_number == 1)
 		{
 			BEGIN_GRID_ITERATION_1D(jc_on_solution_1d.partial_grids[thread_id])
@@ -408,6 +473,17 @@ public: // Solver
 
 	void SetupRHS(const int& thread_id)
 	{
+		if (test_number == 0)
+		{
+			BEGIN_GRID_ITERATION_2D(rhs_2d.partial_grids[thread_id])
+			{
+				T x_coor = rhs_2d.x_min + i*rhs_2d.dx, y_coor = rhs_2d.y_min + j*rhs_2d.dy;
+
+				rhs_2d(i, j) = (T)2*sin(PI*x_coor)*sin(PI*y_coor);
+			}
+			END_GRID_ITERATION_2D;
+		}
+
 		if (test_number == 1)
 		{
 			BEGIN_GRID_ITERATION_1D(rhs_1d.partial_grids[thread_id])
@@ -531,7 +607,7 @@ public: // Member Functions
 					}
 					else
 					{
-						pressure_input(i, j) = (T)0;
+						pressure_input(i, j) = true_solution_2d(i, j);
 					}
 				}
 				else
@@ -559,4 +635,95 @@ public: // Member Functions
 			END_GRID_ITERATION_2D;
 		}
 	}
+
+	void ComputeErrorInL2Norm(const int& thread_id)
+	{
+		BEGIN_HEAD_THREAD_WORK
+		{
+			l2_norm = 0;
+		}
+		END_HEAD_THREAD_WORK;
+		
+		if (test_number == 0)
+		{
+			BEGIN_GRID_ITERATION_2D(solution_2d.partial_grids[thread_id])
+			{
+				l2_norm += POW2(solution_2d(i, j) - true_solution_2d(i, j))*solution_2d.grid.dx2;
+			}
+			END_GRID_ITERATION_SUM(l2_norm);
+		}
+
+		BEGIN_HEAD_THREAD_WORK
+		{
+			l2_norm = sqrt(l2_norm);
+		}
+		END_HEAD_THREAD_WORK;
+	}
+	
+	/*void ComputeErrorInMaxNorm(const int& thread_id)
+	{
+		BEGIN_HEAD_THREAD_WORK
+		{
+			max_norm = 0;
+		}
+		END_HEAD_THREAD_WORK;
+		
+		BEGIN_GRID_ITERATION_2D(grad_u.partial_grids[thread_id])
+		{
+			if (test_number == 2)
+			{
+				T grd_x = grad_u(i, j).x, grd_y = grad_u(i, j).y;
+
+				if (grad_u.draw_for_this(i, j) == true)
+				{
+					if (POW2(0.8*grd_x - 0.2*grd_y) + POW2(0.2*grd_x - 0.6*grd_y) < POW2(0.44))
+					{
+						grad_u.draw_for_this(i, j) = true;
+					}
+					else
+					{
+						grad_u.draw_for_this(i, j) = false;
+					}
+				}
+			}
+
+			if (test_number == 3)
+			{
+				T x_coor = grad_u.x_min + i*grad_u.dx, y_coor = grad_u.y_min + j*grad_u.dy;
+
+				if (grad_u.draw_for_this(i, j) == true)
+				{
+					T domain_region_1 = POW2(x_coor + 0.1) + POW2(y_coor);
+					T domain_region_2 = POW2(x_coor - 0.1) + POW2(y_coor);
+				
+					if (domain_region_1 < POW2(0.85) && x_coor < -0.1)
+					{
+						grad_u.draw_for_this(i, j) = true;
+					}
+					else if (domain_region_2 < POW2(0.85) && x_coor > 0.1)
+					{
+						grad_u.draw_for_this(i, j) = true;
+					}
+					else
+					{
+						grad_u.draw_for_this(i, j) = false;
+					}
+				}
+			}
+		}
+		END_GRID_ITERATION_2D;
+
+		BEGIN_GRID_ITERATION_2D(grad_u.partial_grids[thread_id])
+		{
+			if (grad_u.draw_for_this(i, j) == true)
+			{
+				max_norm = MAX(max_norm, sqrt(POW2(true_solution(i, j).x - grad_u(i, j).x) + POW2(true_solution(i, j).y - grad_u(i, j).y)));
+			}
+			else
+			{
+				continue;
+			}
+		}
+		END_GRID_ITERATION_MAX_2D(max_norm);
+	}*/
 };

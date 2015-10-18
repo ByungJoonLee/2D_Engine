@@ -18,8 +18,9 @@ public: // Essential Data
 	EULERIAN_FLUID_SOLVER_2D*		eulerian_solver;
 
 	OPENGL_LEVELSET*				water_levelset;
-	OPENGL_LEVELSET*				vortex_levelset;
+	//OPENGL_LEVELSET*				vortex_levelset;
 
+	OPENGL_SCALARFIELD*				vortex_levelset;
 	OPENGL_SCALARFIELD*				pressure_field;
 	OPENGL_VECTORFIELD*				velocity_field;
 	
@@ -32,6 +33,11 @@ public: // Constructor and Destructor
 		{
 			water_levelset = new OPENGL_LEVELSET("EULERIAN_WATER_LEVELSET", driver, eulerian_solver->water_levelset, eulerian_solver->second_levelset, multithreading_input, grid_scale);
 			AddObject(water_levelset);
+		}
+		else if (eulerian_solver->bifurcation_test == true)
+		{
+			vortex_levelset = new OPENGL_SCALARFIELD("VORTEX_FUNCTION", driver, &eulerian_solver->vortex_levelset->signed_distance_field);
+			AddObject(vortex_levelset);
 		}
 		else
 		{
@@ -66,7 +72,7 @@ public: // Constructor and Destructor
 		
 		velocity_field = new OPENGL_VECTORFIELD("VELOCITY_FIELD", driver, eulerian_solver->water_velocity_field, eulerian_solver->water_velocity_field_mac_x, eulerian_solver->water_velocity_field_mac_y);
 		AddObject(velocity_field);
-		if (eulerian_solver->vortex_sheet_problem)
+		if (eulerian_solver->vortex_sheet_problem || eulerian_solver->bifurcation_test)
 		{
 			velocity_field->SetDrawType(OPENGL_VECTORFIELD::VECTORFIELD_DRAW_SHOW);
 		}
@@ -74,10 +80,19 @@ public: // Constructor and Destructor
 		{
 			velocity_field->SetDrawType(OPENGL_VECTORFIELD::VECTORFIELD_DRAW_SHOW_MAC);
 		}
-				
-		pressure_field = new OPENGL_SCALARFIELD("PRESSURE_FIELD", driver, &eulerian_solver->water_projection->pressure_field);
-		AddObject(pressure_field);
-		pressure_field->SetDrawType(OPENGL_SCALARFIELD::SCALARFIELD_DRAW_SHOW);
+		
+		if (eulerian_solver->bifurcation_test)
+		{
+			pressure_field = new OPENGL_SCALARFIELD("STREAM_FUNCTION", driver, &eulerian_solver->water_projection->pressure_field);
+			AddObject(pressure_field);
+			pressure_field->SetDrawType(OPENGL_SCALARFIELD::SCALARFIELD_DRAW_SHOW);
+		}
+		else
+		{
+			pressure_field = new OPENGL_SCALARFIELD("PRESSURE_FIELD", driver, &eulerian_solver->water_projection->pressure_field);
+			AddObject(pressure_field);
+			pressure_field->SetDrawType(OPENGL_SCALARFIELD::SCALARFIELD_DRAW_SHOW);
+		}
 	}
 
 	~OPENGL_EULERIAN_FLUID_SOLVER(void)

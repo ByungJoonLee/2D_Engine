@@ -662,6 +662,146 @@ public:
 		multithreading.Sync(thread_id);
 	}
 
+	static void WENO5thForStreamFunctionFormulation(FIELD_STRUCTURE_2D<TT>& rho, FIELD_STRUCTURE_2D<TT>& rho_ghost, const FIELD_STRUCTURE_2D<VT>& velocity, const T& dt, const T& epsilon)
+	{
+		ARRAY_2D<TT>& rho_array(rho.array_for_this);
+
+		T one_over_dx(rho.one_over_dx), one_over_dy(rho.one_over_dy);
+
+		// x-components
+		for (int j = rho.grid.j_start; j <= rho.grid.j_end; j++)
+		{
+			for (int i = rho.grid.i_start; i <= rho.grid.i_end; i++)
+			{
+				TT rho_m_x_1 = one_over_dx*(rho_ghost(i - 2, j) - rho_ghost(i - 3, j));
+				TT rho_m_x_2 = one_over_dx*(rho_ghost(i - 1, j) - rho_ghost(i - 2, j));
+				TT rho_m_x_3 = one_over_dx*(rho_ghost(i, j) - rho_ghost(i - 1, j));
+				TT rho_m_x_4 = one_over_dx*(rho_ghost(i + 1, j) - rho_ghost(i, j));
+				TT rho_m_x_5 = one_over_dx*(rho_ghost(i + 2, j) - rho_ghost(i + 1, j));
+
+				TT rho_p_x_1 = one_over_dx*(rho_ghost(i + 3, j) - rho_ghost(i + 2, j));
+				TT rho_p_x_2 = one_over_dx*(rho_ghost(i + 2, j) - rho_ghost(i + 1, j));
+				TT rho_p_x_3 = one_over_dx*(rho_ghost(i + 1, j) - rho_ghost(i , j));
+				TT rho_p_x_4 = one_over_dx*(rho_ghost(i , j) - rho_ghost(i - 1, j));
+				TT rho_p_x_5 = one_over_dx*(rho_ghost(i - 1, j) - rho_ghost(i - 2, j));
+
+				// y-components
+				TT rho_m_y_1 = one_over_dy*(rho_ghost(i, j - 2) - rho_ghost(i, j - 3));
+				TT rho_m_y_2 = one_over_dy*(rho_ghost(i, j - 1) - rho_ghost(i, j - 2));
+				TT rho_m_y_3 = one_over_dy*(rho_ghost(i, j) - rho_ghost(i, j - 1));
+				TT rho_m_y_4 = one_over_dy*(rho_ghost(i, j + 1) - rho_ghost(i, j));
+				TT rho_m_y_5 = one_over_dy*(rho_ghost(i, j + 2) - rho_ghost(i, j + 1));
+
+				TT rho_p_y_1 = one_over_dy*(rho_ghost(i, j + 3) - rho_ghost(i, j + 2));
+				TT rho_p_y_2 = one_over_dy*(rho_ghost(i, j + 2) - rho_ghost(i, j + 1));
+				TT rho_p_y_3 = one_over_dy*(rho_ghost(i, j + 1) - rho_ghost(i, j));
+				TT rho_p_y_4 = one_over_dy*(rho_ghost(i, j) - rho_ghost(i, j - 1));
+				TT rho_p_y_5 = one_over_dy*(rho_ghost(i, j - 1) - rho_ghost(i, j - 2));
+				
+				// Smoothness
+				// x-components
+				TT s_m_x_1 = (T)13/12*(rho_m_x_1 - 2*rho_m_x_2 + rho_m_x_3)*(rho_m_x_1 - 2*rho_m_x_2 + rho_m_x_3) + (T)1/4*(rho_m_x_1 - 4*rho_m_x_2 + 3*rho_m_x_3)*(rho_m_x_1 - 4*rho_m_x_2 + 3*rho_m_x_3);
+				TT s_m_x_2 = (T)13/12*(rho_m_x_2 - 2*rho_m_x_3 + rho_m_x_4)*(rho_m_x_2 - 2*rho_m_x_3 + rho_m_x_4) + (T)1/4*(rho_m_x_2 - rho_m_x_4)*(rho_m_x_2 - rho_m_x_4);
+				TT s_m_x_3 = (T)13/12*(rho_m_x_3 - 2*rho_m_x_4 + rho_m_x_5)*(rho_m_x_3 - 2*rho_m_x_4 + rho_m_x_5) + (T)1/4*(3*rho_m_x_3 - 4*rho_m_x_4 + rho_m_x_5)*(3*rho_m_x_3 - 4*rho_m_x_4 + rho_m_x_5);
+
+				TT s_p_x_1 = (T)13/12*(rho_p_x_1 - 2*rho_p_x_2 + rho_p_x_3)*(rho_p_x_1 - 2*rho_p_x_2 + rho_p_x_3) + (T)1/4*(rho_p_x_1 - 4*rho_p_x_2 + 3*rho_p_x_3)*(rho_p_x_1 - 4*rho_p_x_2 + 3*rho_p_x_3);
+				TT s_p_x_2 = (T)13/12*(rho_p_x_2 - 2*rho_p_x_3 + rho_p_x_4)*(rho_p_x_2 - 2*rho_p_x_3 + rho_p_x_4) + (T)1/4*(rho_p_x_2 - rho_p_x_4)*(rho_p_x_2 - rho_p_x_4);
+				TT s_p_x_3 = (T)13/12*(rho_p_x_3 - 2*rho_p_x_4 + rho_p_x_5)*(rho_p_x_3 - 2*rho_p_x_4 + rho_p_x_5) + (T)1/4*(3*rho_p_x_3 - 4*rho_p_x_4 + rho_p_x_5)*(3*rho_p_x_3 - 4*rho_p_x_4 + rho_p_x_5);
+
+				// y-components
+				TT s_m_y_1 = (T)13/12*(rho_m_y_1 - 2*rho_m_y_2 + rho_m_y_3)*(rho_m_y_1 - 2*rho_m_y_2 + rho_m_y_3) + (T)1/4*(rho_m_y_1 - 4*rho_m_y_2 + 3*rho_m_y_3)*(rho_m_y_1 - 4*rho_m_y_2 + 3*rho_m_y_3);
+				TT s_m_y_2 = (T)13/12*(rho_m_y_2 - 2*rho_m_y_3 + rho_m_y_4)*(rho_m_y_2 - 2*rho_m_y_3 + rho_m_y_4) + (T)1/4*(rho_m_y_2 - rho_m_y_4)*(rho_m_y_2 - rho_m_y_4);
+				TT s_m_y_3 = (T)13/12*(rho_m_y_3 - 2*rho_m_y_4 + rho_m_y_5)*(rho_m_y_3 - 2*rho_m_y_4 + rho_m_y_5) + (T)1/4*(3*rho_m_y_3 - 4*rho_m_y_4 + rho_m_y_5)*(3*rho_m_y_3 - 4*rho_m_y_4 + rho_m_y_5);
+
+				TT s_p_y_1 = (T)13/12*(rho_p_y_1 - 2*rho_p_y_2 + rho_p_y_3)*(rho_p_y_1 - 2*rho_p_y_2 + rho_p_y_3) + (T)1/4*(rho_p_y_1 - 4*rho_p_y_2 + 3*rho_p_y_3)*(rho_p_y_1 - 4*rho_p_y_2 + 3*rho_p_y_3);
+				TT s_p_y_2 = (T)13/12*(rho_p_y_2 - 2*rho_p_y_3 + rho_p_y_4)*(rho_p_y_2 - 2*rho_p_y_3 + rho_p_y_4) + (T)1/4*(rho_p_y_2 - rho_p_y_4)*(rho_p_y_2 - rho_p_y_4);
+				TT s_p_y_3 = (T)13/12*(rho_p_y_3 - 2*rho_p_y_4 + rho_p_y_5)*(rho_p_y_3 - 2*rho_p_y_4 + rho_p_y_5) + (T)1/4*(3*rho_p_y_3 - 4*rho_p_y_4 + rho_p_y_5)*(3*rho_p_y_3 - 4*rho_p_y_4 + rho_p_y_5);
+
+				// Weights
+				// x-componets
+				TT a_m_x_1 = (T)1/10*(T)1/((epsilon + s_m_x_1)*(epsilon + s_m_x_1));
+				TT a_m_x_2 = (T)6/10*(T)1/((epsilon + s_m_x_2)*(epsilon + s_m_x_2));
+				TT a_m_x_3 = (T)3/10*(T)1/((epsilon + s_m_x_3)*(epsilon + s_m_x_3));
+
+				TT sum_m_x = a_m_x_1 + a_m_x_2 + a_m_x_3;
+
+				TT w_m_x_1 = a_m_x_1/sum_m_x;
+				TT w_m_x_2 = a_m_x_2/sum_m_x;
+				TT w_m_x_3 = a_m_x_3/sum_m_x;
+
+				TT a_p_x_1 = (T)1/10*(T)1/((epsilon + s_p_x_1)*(epsilon + s_p_x_1));
+				TT a_p_x_2 = (T)6/10*(T)1/((epsilon + s_p_x_2)*(epsilon + s_p_x_2));
+				TT a_p_x_3 = (T)3/10*(T)1/((epsilon + s_p_x_3)*(epsilon + s_p_x_3));
+
+				TT sum_p_x = a_p_x_1 + a_p_x_2 + a_p_x_3;
+
+				TT w_p_x_1 = a_p_x_1/sum_p_x;
+				TT w_p_x_2 = a_p_x_2/sum_p_x;
+				TT w_p_x_3 = a_p_x_3/sum_p_x;
+
+				// y-component
+				TT a_m_y_1 = (T)1/10*(T)1/((epsilon + s_m_y_1)*(epsilon + s_m_y_1));
+				TT a_m_y_2 = (T)6/10*(T)1/((epsilon + s_m_y_2)*(epsilon + s_m_y_2));
+				TT a_m_y_3 = (T)3/10*(T)1/((epsilon + s_m_y_3)*(epsilon + s_m_y_3));
+
+				TT sum_m_y = a_m_y_1 + a_m_y_2 + a_m_y_3;
+
+				TT w_m_y_1 = a_m_y_1/sum_m_y;
+				TT w_m_y_2 = a_m_y_2/sum_m_y;
+				TT w_m_y_3 = a_m_y_3/sum_m_y;
+
+				TT a_p_y_1 = (T)1/10*(T)1/((epsilon + s_p_y_1)*(epsilon + s_p_y_1));
+				TT a_p_y_2 = (T)6/10*(T)1/((epsilon + s_p_y_2)*(epsilon + s_p_y_2));
+				TT a_p_y_3 = (T)3/10*(T)1/((epsilon + s_p_y_3)*(epsilon + s_p_y_3));
+
+				TT sum_p_y = a_p_y_1 + a_p_y_2 + a_p_y_3;
+
+				TT w_p_y_1 = a_p_y_1/sum_p_y;
+				TT w_p_y_2 = a_p_y_2/sum_p_y;
+				TT w_p_y_3 = a_p_y_3/sum_p_y;
+
+				// Approximation of derivatives
+				// rho_x
+				TT rho_m_x = w_m_x_1*(rho_m_x_1*(T)1/3 - rho_m_x_2*(T)7/6 + rho_m_x_3*(T)11/6) + w_m_x_2*(rho_m_x_2*(-(T)1/6) + rho_m_x_3*(T)5/6 + rho_m_x_4*(T)1/3) + w_m_x_3*(rho_m_x_3*(T)1/3 + rho_m_x_4*(T)5/6 - rho_m_x_5*(T)1/6);
+				TT rho_p_x = w_p_x_1*(rho_p_x_1*(T)1/3 - rho_p_x_2*(T)7/6 + rho_p_x_3*(T)11/6) + w_p_x_2*(rho_p_x_2*(-(T)1/6) + rho_p_x_3*(T)5/6 + rho_p_x_4*(T)1/3) + w_p_x_3*(rho_p_x_3*(T)1/3 + rho_p_x_4*(T)5/6 - rho_p_x_5*(T)1/6);
+
+				// rho_y
+				TT rho_m_y = w_m_y_1*(rho_m_y_1*(T)1/3 - rho_m_y_2*(T)7/6 + rho_m_y_3*(T)11/6) + w_m_y_2*(rho_m_y_2*(-(T)1/6) + rho_m_y_3*(T)5/6 + rho_m_y_4*(T)1/3) + w_m_y_3*(rho_m_y_3*(T)1/3 + rho_m_y_4*(T)5/6 - rho_m_y_5*(T)1/6);
+				TT rho_p_y = w_p_y_1*(rho_p_y_1*(T)1/3 - rho_p_y_2*(T)7/6 + rho_p_y_3*(T)11/6) + w_p_y_2*(rho_p_y_2*(-(T)1/6) + rho_p_y_3*(T)5/6 + rho_p_y_4*(T)1/3) + w_p_y_3*(rho_p_y_3*(T)1/3 + rho_p_y_4*(T)5/6 - rho_p_y_5*(T)1/6);
+
+				TT u_vel, v_vel;
+
+				u_vel = velocity(i, j).x;
+				v_vel = velocity(i, j).y;
+
+				TT diffusive_term = one_over_dx*one_over_dx*(rho_ghost(i + 1, j) + rho_ghost(i - 1, j) + rho_ghost(i, j + 1) + rho_ghost(i, j - 1) - 4*rho_ghost(i, j));
+
+				if (u_vel > (TT)0)
+				{
+					if (v_vel > (TT)0)
+					{
+						rho_array(i, j) = rho_array(i, j) - dt*(u_vel*rho_m_x + v_vel*rho_m_y - diffusive_term);
+					}
+					else
+					{
+						rho_array(i, j) = rho_array(i, j) - dt*(u_vel*rho_m_x + v_vel*rho_p_y - diffusive_term);
+					}
+				}
+				else
+				{
+					if (v_vel > (TT)0)
+					{
+						rho_array(i, j) = rho_array(i, j) - dt*(u_vel*rho_p_x + v_vel*rho_m_y - diffusive_term);
+					}
+					else
+					{
+						rho_array(i, j) = rho_array(i, j) - dt*(u_vel*rho_p_x + v_vel*rho_p_y - diffusive_term);
+					}
+				}
+			}
+		}
+	}
+
 	static void WENO5thReinitialization(FIELD_STRUCTURE_2D<TT>& rho, FIELD_STRUCTURE_2D<TT>& rho_ghost, const T& dt, const T& epsilon, const FIELD_STRUCTURE_2D<T>& sign_function)
 	{
 		ARRAY_2D<TT>& rho_array(rho.array_for_this);
@@ -1262,7 +1402,7 @@ public:
 	{
 		ARRAY_2D<TT>& rho_array(rho.array_for_this);
 
-		//rho_ghost.FillGhostCellsFrom(rho_array, true, thread_id);
+		rho_ghost.FillGhostCellsFrom(rho_array, true, thread_id);
 
 		multithreading.Sync(thread_id);
 

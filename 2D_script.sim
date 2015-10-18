@@ -2,14 +2,14 @@ SIMULATION_WORLD
 {
 	// simulation properties
 	dt = 0.000001
-	max_dt = 15
+	max_dt = 1
 	CFL = 0.9
 	
 	// simulation options
 	use_eulerian_solver	= true
 	
 	// Number of threads
-	number_of_threads       = 1
+	number_of_threads       = 24
 
 	auto_capture = true
 	auto_video = true
@@ -22,9 +22,9 @@ SIMULATION_WORLD
 	
 	FLUID_SOLVER_OPTIONS
 	{
-		air_water_simulation    				= false
+		air_water_simulation    				= true
 		oil_water_simulation    				= false
-		vortex_sheet_problem    				= true
+		vortex_sheet_problem    				= false
 		bifurcation_test						= false
 	
 		VORTEX_SHEET_PROBLEM_TEST_NUMBER
@@ -36,9 +36,9 @@ SIMULATION_WORLD
 	NUMERICAL_TEST_OPTIONS
 	{
 		numerical_integration_test  			= false
-		poisson_equation_with_jump_condition 	= false
+		poisson_equation_with_jump_condition 	= true
 		signal_processing_test					= false
-		monge_ampere_solver_test    			= true
+		monge_ampere_solver_test    			= false
 		
 		NUMERICAL_INTEGRATION_OPTION
 		{
@@ -67,7 +67,7 @@ SIMULATION_WORLD
 				resolution_scale = 1
 
 				start_indices = (0,0)
-				base_grid_resolution = (81, 121)
+				base_grid_resolution = (321, 481)
 				base_grid_min = ( -1, -1.5)
 				base_grid_max = ( 1, 1.5)
 			}
@@ -269,9 +269,9 @@ FLUID_SOLVER_UNIFORM
 	{
 		is_velocity_advection_active = true
 		is_sourcing_active = true
-		is_projection_active = false
+		is_projection_active = true
 		is_levelset_advection_active = true
-		is_viscosity_active = false
+		is_viscosity_active = true
 
 		fastsweeping_reinitialization = false
 		sussmanstyle_reinitialization = true

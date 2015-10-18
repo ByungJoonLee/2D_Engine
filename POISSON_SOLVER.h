@@ -23,6 +23,7 @@ public: // For matrix-vector type solver
 
 public: // Solver
 	LINEAR_SOLVER*						linear_solver;
+	int									solver_type;
 
 public: // Density 
 	T									density_p, density_m;
@@ -34,7 +35,7 @@ public: // Multithreading
 
 public: // Constructors and Destructor
 	POISSON_SOLVER(void)
-		: tolerance((T)1e-4), sqr_tolerance(tolerance*tolerance), max_iteration(100), linear_solver(0), multithreading(0)
+		: tolerance((T)1e-4), sqr_tolerance(tolerance*tolerance), max_iteration(100), linear_solver(0), multithreading(0), solver_type(CG)
 	{}
 
 	~POISSON_SOLVER(void)

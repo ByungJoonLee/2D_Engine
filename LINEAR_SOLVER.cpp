@@ -33,6 +33,12 @@ void LINEAR_SOLVER::Solve(const CSR_MATRIX<T>& A, VECTOR_ND<T>& x, const VECTOR_
 	exit(1);
 }
 
+void LINEAR_SOLVER::Solve(const int& thread_id)
+{
+	cout << "virtual LINEAR_SOLVER::Solve" << endl;
+	exit(1);
+}
+
 void LINEAR_SOLVER::SetTolerance(const T& tolerance_input)
 {
 	tolerance = tolerance_input;

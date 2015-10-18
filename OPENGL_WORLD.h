@@ -69,7 +69,8 @@ public: // Essential Data
 	
 	OPENGL_LEVELSET*				opengl_levelset_for_poisson_equation_test;
 	OPENGL_SCALARFIELD*				opengl_solution_for_poisson_equation_test;
-	
+	OPENGL_SCALARFIELD*				opengl_true_solution_for_poisson_equation_test;
+
 	OPENGL_VECTORFIELD*				opengl_gradient_map_for_monge_ampere_test;
 	OPENGL_VECTORFIELD*				opengl_true_solution_for_monge_ampere_test;
 	OPENGL_SCALARFIELD*				opengl_solution_for_monge_ampere_test;
@@ -247,7 +248,9 @@ public: // Initialization Function
 				all_objects.push_back(opengl_levelset_for_poisson_equation_test);
 				opengl_solution_for_poisson_equation_test = new OPENGL_SCALARFIELD("POISSON_SOLUTION_FIELD", driver, &simulation_world->poisson_equation_test.solution_2d);
 				all_objects.push_back(opengl_solution_for_poisson_equation_test);
-				
+				opengl_true_solution_for_poisson_equation_test = new OPENGL_SCALARFIELD("POISSON_TRUE_SOLUTION_FIELD", driver, &simulation_world->poisson_equation_test.true_solution_2d);
+				all_objects.push_back(opengl_true_solution_for_poisson_equation_test);
+
 				if (simulation_world->world_discretization.grid_1d)
 				{
 					test_1d = true;

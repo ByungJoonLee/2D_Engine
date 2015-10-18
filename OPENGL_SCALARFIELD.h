@@ -189,6 +189,31 @@ public: // Initialization Function
 		int i, j;
 		int count_cell = 0;
 		
+		// For scaling the given graph
+		float max_scalar = 0.0f;
+		
+		if (mode == FLOAT_MODE)
+		{
+			LOOPS_2D(i, j, min[FIELD_X], min[FIELD_Y], max[FIELD_X], max[FIELD_Y])
+			{
+				if (max_scalar < abs(scalar_field_f->array_for_this(i, j)))
+				{
+					max_scalar = abs(scalar_field_f->array_for_this(i, j));
+				}
+			}
+		}
+		
+		if (mode == INT_MODE)
+		{
+			LOOPS_2D(i, j, min[FIELD_X], min[FIELD_Y], max[FIELD_X], max[FIELD_Y])
+			{
+				if (max_scalar < abs(scalar_field_i->array_for_this(i, j)))
+				{
+					max_scalar = abs(scalar_field_i->array_for_this(i, j));
+				}
+			}
+		}
+		
 		LOOPS_2D(i, j, min[FIELD_X], min[FIELD_Y], max[FIELD_X], max[FIELD_Y])
 		{
 			float scalar = 0.0f;
@@ -215,7 +240,9 @@ public: // Initialization Function
 
 			glBegin(GL_POINTS);
 				//glVertex3f(ces.x, ces.y, 1.0f);
-				glVertex3f(x_coor, y_coor, scalar);
+				GLfloat height_indicator = (GLfloat)0.5*(scalar/max_scalar + 1);
+				glColor3f(height_indicator, 1.0f - height_indicator, 1.0f - height_indicator);
+				glVertex3f(x_coor, y_coor, scalar/max_scalar);
 			glEnd();
 			
 			/*glBegin(GL_QUADS);

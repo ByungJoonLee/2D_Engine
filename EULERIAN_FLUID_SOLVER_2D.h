@@ -475,8 +475,7 @@ public: // Initialization Functions
 		}
 		if (bifurcation_test)
 		{
-			water_velocity_field_mac_x->array_for_this.AssignAllValues(T());
-			water_velocity_field_mac_y->array_for_this.AssignAllValues(T());
+			water_velocity_field->array_for_this.AssignAllValues(VT());
 		}
 
 		// Initialize Advection Solver
@@ -543,6 +542,85 @@ public: // Initialization Functions
 			water_projection->oil_density = water_density;
 		}
 
+		if (bifurcation_test)
+		{
+			water_projection->bifurcation_test = true;
+			water_projection->test_number = test_number;
+			water_projection->InitializeFromBlock(fluid_solver_block.FindBlock("PROJECTION"));
+			water_projection->water_density = water_density;
+			water_projection->oil_density = water_density;
+
+			// Initial Stream Function
+			if (test_number == 1)
+			{
+				FIELD_STRUCTURE_2D<T>& stream_function = water_projection->pressure_field;
+				GRID_STRUCTURE_2D& stream_grid = stream_function.grid;
+
+				int i(0), j(0);
+				
+				LOOPS_2D(i, j, stream_grid.i_start, stream_grid.j_start, stream_grid.i_end, stream_grid.j_end)
+				{
+					T x_coor = stream_grid.x_min + i*stream_grid.dx, y_coor = stream_grid.y_min + j*stream_grid.dy;
+						
+					T f_0 = (T)1/6*(cos(2*(x_coor + y_coor)) - 16*cos(x_coor + y_coor));
+					T F_1 = 4*cos(x_coor) - cos(2*x_coor);
+					T F_2 = 15*cos(x_coor) - 6*cos(2*x_coor) + cos(3*x_coor);
+					T F_3 = 5*sin(x_coor) - 4*sin(2*x_coor) + sin(3*x_coor);
+					T F_4 = 5*sin(y_coor) - 4*sin(2*y_coor) + sin(3*y_coor);
+
+					T a = 7, b = -10, eta = 1e-6; 
+					T d = a, c = (-1 + (T)493/2716*a)*a + eta;
+
+					stream_function(i, j) = f_0 + a*F_1 + b*F_2 + c*F_3 + d*F_4;
+				}
+			}
+			if (test_number == 2)
+			{
+				FIELD_STRUCTURE_2D<T>& stream_function = water_projection->pressure_field;
+				GRID_STRUCTURE_2D& stream_grid = stream_function.grid;
+
+				int i(0), j(0);
+				
+				LOOPS_2D(i, j, stream_grid.i_start, stream_grid.j_start, stream_grid.i_end, stream_grid.j_end)
+				{
+					T x_coor = stream_grid.x_min + i*stream_grid.dx, y_coor = stream_grid.y_min + j*stream_grid.dy;
+						
+					T f_0 = (T)1/6*(cos(2*(x_coor + y_coor)) - 16*cos(x_coor + y_coor));
+					T F_1 = 4*cos(x_coor) - cos(2*x_coor);
+					T F_2 = 15*cos(x_coor) - 6*cos(2*x_coor) + cos(3*x_coor);
+					T F_3 = 5*sin(x_coor) - 4*sin(2*x_coor) + sin(3*x_coor);
+					T F_4 = 5*sin(y_coor) - 4*sin(2*y_coor) + sin(3*y_coor);
+
+					T a = 7, b = -10, eta = 0, eta_tilde = 1e-6; 
+					T d = a, c = (-1 + (T)493/2716*a)*a + eta;
+
+					stream_function(i, j) = f_0 + a*F_1 + b*F_2 + c*F_3 + d*F_4 - eta_tilde*F_3;
+				}
+			}
+			if (test_number == 3)
+			{
+				FIELD_STRUCTURE_2D<T>& stream_function = water_projection->pressure_field;
+				GRID_STRUCTURE_2D& stream_grid = stream_function.grid;
+
+				int i(0), j(0);
+				
+				LOOPS_2D(i, j, stream_grid.i_start, stream_grid.j_start, stream_grid.i_end, stream_grid.j_end)
+				{
+					T x_coor = stream_grid.x_min + i*stream_grid.dx, y_coor = stream_grid.y_min + j*stream_grid.dy;
+						
+						T f_0 = -2*cos(x_coor + y_coor);
+						T F_1 = sin(2*x_coor) - 2*sin(x_coor);
+						T F_2 = 5*sin(x_coor) - 4*sin(2*x_coor) + sin(3*x_coor);
+						T F_3 = 8*sin(y_coor) - sin(2*y_coor);
+						
+						T a = 1, b = 10, epsilon = 1e-6; 
+						T c = (T)epsilon/6;
+
+					stream_function(i, j) = f_0 + a*F_1 + b*F_2 + c*F_3;
+				}
+			}
+		}
+
 		if (air_water_simulation)
 		{
 			if (water_projection->air_bubble_rising)
@@ -602,6 +680,41 @@ public: // Initialization Functions
 		vortex_levelset->FillGhostCellsFromPointer(&(vortex_levelset->phi), false);
 		
 		sign_function.Initialize(water_levelset->signed_distance_field.grid, 3, multithreading);
+
+		// Initialize Velocity for the bifurcation test
+		if (bifurcation_test)
+		{
+			FIELD_STRUCTURE_2D<T>& stream_function = water_projection->pressure_field;
+
+			GRID_ITERATION_2D(water_velocity_field->grid)
+			{
+				if (j == j_start)
+				{
+					water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j + 1) - stream_function(i, j_end - 1));
+					water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i + 1, j) - stream_function(i - 1, j));
+				}
+				else if (j == j_end)
+				{
+					water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j_start + 1) - stream_function(i, j - 1));
+					water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i + 1, j) - stream_function(i - 1, j)); 
+				}
+				else if (i == i_start)
+				{
+					water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j + 1) - stream_function(i, j - 1));
+					water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i + 1, j) - stream_function(i_end - 1, j)); 
+				}
+				else if (i == i_end)
+				{
+					water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j + 1) - stream_function(i, j - 1));
+					water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i_start + 1, j) - stream_function(i - 1, j)); 
+				}
+				else
+				{
+					water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j + 1) - stream_function(i, j - 1));
+					water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i + 1, j) - stream_function(i - 1, j));
+				}
+			}
+		}
 	}
 
 public: // Advancing
@@ -1252,132 +1365,9 @@ public: // Advancing
 			{
 				if (vortex_sheet_problem)
 				{
-					//BEGIN_HEAD_THREAD_WORK
-					//{
-					//	water_projection->DeterminePressure();
-					//}
-					//END_HEAD_THREAD_WORK;
-
-					//BEGIN_GRID_ITERATION_2D(water_velocity_field->partial_grids[thread_id])
-					//{
-					//	water_velocity_field->array_for_this(i, j).x = water_velocity_field->one_over_2dy*(water_projection->pressure_field(i, j + 1) - water_projection->pressure_field(i, j - 1));
-					//	water_velocity_field->array_for_this(i, j).y = -water_velocity_field->one_over_2dx*(water_projection->pressure_field(i + 1, j) - water_projection->pressure_field(i - 1, j));
-					//	/*water_velocity_field->array_for_this(i, j).x = water_velocity_field->one_over_2dx*(water_projection->pressure_field(i + 1, j) - water_projection->pressure_field(i - 1, j));
-					//	water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dy*(water_projection->pressure_field(i, j + 1) - water_projection->pressure_field(i, j - 1));*/
-					//}
-					//END_GRID_ITERATION_2D;
-
-					//ofstream fout;
-					//fout.open("velocity_x");
-					//for (int j = 0; j <= water_velocity_field->grid.j_end; j++)
-					//{
-					//	for (int i = 0; i <= water_velocity_field->grid.i_end; i++)
-					//	{
-					//		fout << water_velocity_field->array_for_this(i, j).x << " ";
-					//	}
-					//	fout << endl;
-					//}
-					//fout.close();
-
-					//fout.open("velocity_y");
-					//for (int j = 0; j <= water_velocity_field->grid.j_end; j++)
-					//{
-					//	for (int i = 0; i <= water_velocity_field->grid.i_end; i++)
-					//	{
-					//		fout << water_velocity_field->array_for_this(i, j).y << " ";
-					//	}
-					//	fout << endl;
-					//}
-					//fout.close();
-
-					//vector_field_ghost.FillGhostCellsFrom(water_velocity_field->array_for_this, true);
-
-					//BEGIN_HEAD_THREAD_WORK
-					//{
-					//	temp_for_levelset.Initialize(base_grid, 2, multithreading);
-					//}
-					//END_HEAD_THREAD_WORK;
-
-					//BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
-					//{
-					//	T temp = vortex_levelset->arr(i, j);
-					//	temp_for_levelset(i, j) = temp;
-					//}
-					//END_GRID_ITERATION_2D;
-
-					//Vortex_Advection(dt, thread_id);
-					//Vortex_Advection(dt, thread_id);
-
-					//BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
-					//{
-					//	vortex_levelset->arr(i, j) = (T)0.75*temp_for_levelset(i, j) + (T)0.25*vortex_levelset->arr(i, j);
-					//}
-					//END_GRID_ITERATION_2D;
-
-					//Vortex_Advection(dt, thread_id);
-
-					//BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
-					//{
-					//	vortex_levelset->arr(i, j) = 1/(T)3*temp_for_levelset(i, j) + 2/(T)3*vortex_levelset->arr(i, j);
-					//}
-					//END_GRID_ITERATION_2D;
-
-					//BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
-					//{
-					//	T temp = vortex_levelset->arr(i, j);
-					//	temp_for_levelset(i, j) = temp;
-					//}
-					//END_GRID_ITERATION_2D;
-
-					//Reinitialization(dt, thread_id);
-					//Reinitialization(dt, thread_id);
-
-					//BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
-					//{
-					//	vortex_levelset->arr(i, j) = (T)0.75*temp_for_levelset(i, j) + (T)0.25*vortex_levelset->arr(i, j);
-					//}
-					//END_GRID_ITERATION_2D;
-
-					//Reinitialization(dt, thread_id);
-
-					//BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
-					//{
-					//	vortex_levelset->arr(i, j) = 1/(T)3*temp_for_levelset(i, j) + 2/(T)3*vortex_levelset->arr(i, j);
-					//}
-					//END_GRID_ITERATION_2D;
-					//
-					//fout.open("vortex_levelset");
-					//for (int j = 0; j <= vortex_levelset->grid.j_end; j++)
-					//{
-					//	for (int i = 0; i <= vortex_levelset->grid.i_end; i++)
-					//	{
-					//		fout << vortex_levelset->arr(i, j) << " ";
-					//	}
-					//	fout << endl;
-					//}
-					//fout.close();
-
 					magnitude_of_gradient_old.Initialize(base_grid, 2, multithreading);
 
 					water_levelset->FillGhostCellsContinuousDerivativesFromPointer(&(water_levelset->phi), true);
-
-					/*for (int k = water_levelset->grid.j_start; k <= water_levelset->grid.j_end; k++)
-					{
-						for (int ghost = 1; ghost <= water_levelset->ghost_width; ghost++)
-						{
-							water_levelset->arr(water_levelset->grid.i_start - ghost, k) = water_levelset->arr(water_levelset->grid.i_end - ghost, k);
-							water_levelset->arr(water_levelset->grid.i_end + ghost, k) = water_levelset->arr(water_levelset->grid.i_start + ghost, k);
-						}
-					}
-
-					for (int k = water_levelset->grid.i_start; k <= water_levelset->grid.i_end; k++)
-					{
-						for (int ghost = 1; ghost <= water_levelset->ghost_width; ghost++)
-						{
-							water_levelset->arr(k, water_levelset->grid.j_start - ghost) = water_levelset->arr(k, water_levelset->grid.j_end - ghost) - 2;
-							water_levelset->arr(k, water_levelset->grid.j_end + ghost) = water_levelset->arr(k, water_levelset->grid.j_start + ghost) + 2;
-						}
-					}*/
 
 					water_levelset->ComputeGradient(thread_id);
 					
@@ -1472,58 +1462,6 @@ public: // Advancing
 					}
 					END_GRID_ITERATION_2D;
 				
-					/*temp_for_levelset.Initialize(base_grid, 2, multithreading);
-			
-					BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
-					{
-						T temp = water_levelset->arr(i, j);
-						temp_for_levelset(i, j) = temp;
-					}
-					END_GRID_ITERATION_2D;
-
-					Reinitialization(dt, thread_id);
-					Reinitialization(dt, thread_id);
-	
-					BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
-					{
-						water_levelset->arr(i, j) = (T)0.75*temp_for_levelset(i, j) + (T)0.25*water_levelset->arr(i, j);
-					}
-					END_GRID_ITERATION_2D;
-					
-					Reinitialization(dt, thread_id);
-	
-					BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
-					{
-						water_levelset->arr(i, j) = 1/(T)3*temp_for_levelset(i, j) + 2/(T)3*water_levelset->arr(i, j);
-					}
-					END_GRID_ITERATION_2D;*/
-					
-					/*ofstream fout;
-					fout.open("water_levelset");
-					for (int j = 0; j <= water_levelset->grid.j_end; j++)
-					{
-						for (int i = 0; i <= water_levelset->grid.i_end; i++)
-						{
-							fout << water_levelset->arr(i, j) << " ";
-						}
-						fout << endl;
-					}
-					fout.close();
-
-					if (test_number == 3)
-					{
-						fout.open("second_levelset");
-						for (int j = 0; j <= water_levelset->grid.j_end; j++)
-						{
-							for (int i = 0; i <= water_levelset->grid.i_end; i++)
-							{
-								fout << second_levelset->arr(i, j) << " ";
-							}
-							fout << endl;
-						}
-						fout.close(); 
-					}*/
-
 					magnitude_of_gradient_new.Initialize(base_grid, 2, multithreading);
 
 					water_levelset->FillGhostCellsContinuousDerivativesFromPointer(&(water_levelset->phi), true);
@@ -1624,6 +1562,119 @@ public: // Advancing
 
 					vector_field_ghost.FillGhostCellsFrom(water_velocity_field->array_for_this, true);
 				}
+				else if (bifurcation_test)
+				{
+					FIELD_STRUCTURE_2D<T>& stream_function = water_projection->pressure_field;
+
+					/*ofstream fout;
+					fout.open("stream_function");
+					for (int j = 0; j <= water_projection->pressure_field.j_end; j++)
+					{
+						for (int i = 0; i <= water_projection->pressure_field.i_end; i++)
+						{
+							fout << water_projection->pressure_field(i, j) << " ";
+						}
+						fout << endl;
+					}
+					fout.close();
+
+					fout.open("vortex_levelset");
+					for (int j = 0; j <= vortex_levelset->grid.j_end; j++)
+					{
+						for (int i = 0; i <= vortex_levelset->grid.i_end; i++)
+						{
+							fout << vortex_levelset->arr(i, j) << " ";
+						}
+						fout << endl;
+					}
+					fout.close();*/
+
+					BEGIN_GRID_ITERATION_2D(water_velocity_field->partial_grids[thread_id])
+					{
+						if (j == j_start)
+						{
+							water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j + 1) - stream_function(i, j_end - 1));
+							water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i + 1, j) - stream_function(i - 1, j));
+						}
+						else if (j == j_end)
+						{
+							water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j_start + 1) - stream_function(i, j - 1));
+							water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i + 1, j) - stream_function(i - 1, j)); 
+						}
+						else if (i == i_start)
+						{
+							water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j + 1) - stream_function(i, j - 1));
+							water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i + 1, j) - stream_function(i_end - 1, j)); 
+						}
+						else if (i == i_end)
+						{
+							water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j + 1) - stream_function(i, j - 1));
+							water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i_start + 1, j) - stream_function(i - 1, j)); 
+						}
+						else
+						{
+							water_velocity_field->array_for_this(i, j).x = -water_velocity_field->one_over_2dy*(stream_function(i, j + 1) - stream_function(i, j - 1));
+							water_velocity_field->array_for_this(i, j).y = water_velocity_field->one_over_2dx*(stream_function(i + 1, j) - stream_function(i - 1, j));
+						}
+					}
+					END_GRID_ITERATION_2D;
+					
+					/*fout.open("velocity_x");
+					for (int j = 0; j <= water_velocity_field->grid.j_end; j++)
+					{
+						for (int i = 0; i <= water_velocity_field->grid.i_end; i++)
+						{
+							fout << water_velocity_field->array_for_this(i, j).x << " ";
+						}
+						fout << endl;
+					}
+					fout.close();
+
+					fout.open("velocity_y");
+					for (int j = 0; j <= water_velocity_field->grid.j_end; j++)
+					{
+						for (int i = 0; i <= water_velocity_field->grid.i_end; i++)
+						{
+							fout << water_velocity_field->array_for_this(i, j).y << " ";
+						}
+						fout << endl;
+					}
+					fout.close();*/
+
+					temp_for_vortex.Initialize(base_grid, 2, multithreading);
+			
+					BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
+					{
+						T temp = vortex_levelset->arr(i, j);
+						temp_for_vortex(i, j) = temp;
+					}
+					END_GRID_ITERATION_2D;
+
+					Vortex_Advection_In_Stream_Function_Formulation(dt, thread_id);
+					Vortex_Advection_In_Stream_Function_Formulation(dt, thread_id);
+	
+					BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
+					{
+						vortex_levelset->arr(i, j) = (T)0.75*temp_for_vortex(i, j) + (T)0.25*vortex_levelset->arr(i, j);
+					}
+					END_GRID_ITERATION_2D;
+
+					Vortex_Advection_In_Stream_Function_Formulation(dt, thread_id);
+	
+					BEGIN_GRID_ITERATION_2D(partial_base_grids[thread_id])
+					{
+						vortex_levelset->arr(i, j) = 1/(T)3*temp_for_vortex(i, j) + 2/(T)3*vortex_levelset->arr(i, j);
+					}
+					END_GRID_ITERATION_2D;
+								
+					BEGIN_HEAD_THREAD_WORK
+					{
+						water_projection->DeterminePressure();
+					}
+					END_HEAD_THREAD_WORK;
+
+					vector_field_ghost.FillGhostCellsFrom(water_velocity_field->array_for_this, true);
+				}
 				else
 				{
 					BEGIN_HEAD_THREAD_WORK
@@ -1679,22 +1730,10 @@ public: // Advancing
 						water_levelset->arr(i, j) = 1/(T)3*temp_for_levelset(i, j) + 2/(T)3*water_levelset->arr(i, j);
 					}
 					END_GRID_ITERATION_2D;
-
-					ofstream fout;
-					fout.open("water_levelset");
-					for (int j = 0; j <= water_levelset->grid.j_end; j++)
-					{
-						for (int i = 0; i <= water_levelset->grid.i_end; i++)
-						{
-							fout << water_levelset->arr(i, j) << " ";
-						}
-						fout << endl;
-					}
-					fout.close();
 				}
 			}
 			
-			if (vortex_sheet_problem)
+			if (vortex_sheet_problem || bifurcation_test)
 			{
 				
 			}
@@ -2005,6 +2044,12 @@ public: // Simulation Steps
 	void Vortex_Advection(const T& dt, const int& thread_id)
 	{
 		advecting_field_variables->Solve_Vortex(dt, thread_id);
+		vortex_levelset->FillGhostCellsFrom(vortex_levelset->phi, true);
+	}
+
+	void Vortex_Advection_In_Stream_Function_Formulation(const T& dt, const int& thread_id)
+	{
+		advecting_field_variables->Solve_Vortex_In_Stream_Function_Formulation(dt, thread_id);
 		vortex_levelset->FillGhostCellsFrom(vortex_levelset->phi, true);
 	}
 
@@ -3335,7 +3380,7 @@ public: // Functions related to the time
 		
 		int i(0), j(0);
 		
-		if (vortex_sheet_problem)
+		if (vortex_sheet_problem || bifurcation_test)
 		{
 			GRID_ITERATION_2D(water_velocity_field->grid)
 			{
