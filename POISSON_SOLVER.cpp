@@ -13,6 +13,19 @@ void POISSON_SOLVER::Initialize(const T& tolerance_input, const int& max_itr_inp
 	SetTolerance(tolerance_input);
 }
 
+void POISSON_SOLVER::Initialize(const T& tolerance_input, const int& max_itr_input, GRID_STRUCTURE_2D* grid_ghost_input = 0, const int ghost_width_input = 0, ARRAY<GRID_STRUCTURE_2D>* partial_grids_input = 0, int num_levels_input = 1, MULTITHREADING* multithreading_input = 0)
+{
+	num_levels = num_levels_input;
+	ghost_width = ghost_width_input;
+
+	multithreading = multithreading_input;
+	max_iteration = max_itr_input; 
+				
+	InitializeLinearSolver(CG);
+
+	SetTolerance(tolerance_input);
+}
+
 void POISSON_SOLVER::InitializeLinearSolver(const POISSON_SOLVER_TYPE linear_solver_type)
 {
 	DELETE_POINTER(linear_solver);
@@ -555,7 +568,7 @@ void POISSON_SOLVER::BuildLinearSystem(CSR_MATRIX<T>& A_matrix, VECTOR_ND<T>& x_
 
 		A_matrix.AssignValue(bc(i, j), bc(i, j), coef_ijk*inv_dydy, thread_id);
 			
-		b_vector[bc(i, j)] = RHS(i, j);
+		b_vector[bc(i, j)] = -RHS(i, j);
 
 		if (bc(i - 1, j) == BC_DIR)
 		{
@@ -1602,7 +1615,177 @@ void POISSON_SOLVER::VectorToGrid(const VECTOR_ND<T>& x, FIELD_STRUCTURE_2D<T>& 
 {
 	BEGIN_GRID_ITERATION_2D(pressure.partial_grids[thread_id])
 	{
-		pressure.array_for_this(i, j) = x[bc(i, j)];
+		if (bc(i, j) > -1)
+		{
+			pressure.array_for_this(i, j) = x[bc(i, j)];
+		}
+	}
+	END_GRID_ITERATION_2D;
+}
+
+void POISSON_SOLVER::PrecomputeGSCoefficients(const FIELD_STRUCTURE_2D<int>& bc, const int& thread_id)
+{
+	// Speedup constants and references
+	const T dx = bc.grid.dx, inv_dx = (T)1/dx, half_dx = (T)0.5*dx;
+	const T dxdx = dx*dx, inv_dxdx = (T)1/dxdx;
+	const ARRAY_2D<int> &bc_arr(bc.array_for_this);
+	
+	BEGIN_GRID_ITERATION_2D(gs_coefficients.partial_grids[thread_id])
+	{
+		GS_COEFFICIENTS &gscoef(gs_coefficients(i, j));
+
+		gscoef.Initialize();
+
+		if (bc_arr(i, j) < 0)
+		{
+			continue;
+		}
+
+		const T density_center = (T)1;
+
+		T coeff_ij = 0;
+
+		// if neighbor is full cell
+		if (bc(i + 1, j) > -1)
+		{
+			const T coef = inv_dxdx;
+			coeff_ij += coef;
+			gscoef.plus[0] = coef;
+		}
+		if (bc(i - 1, j) > -1)
+		{
+			const T coef = inv_dxdx;
+			coeff_ij += coef;
+			gscoef.minus[0] = coef;
+		}
+		if (bc(i, j + 1) > -1)
+		{
+			const T coef = inv_dxdx;
+			coeff_ij += coef;
+			gscoef.plus[1] = coef;
+		}
+		if (bc(i, j - 1) > -1)
+		{
+			const T coef = inv_dxdx;
+			coeff_ij += coef;
+			gscoef.minus[1] = coef;
+		}
+
+		if (bc(i + 1, j) == BC_DIR)
+		{
+			coeff_ij += inv_dxdx;
+		}
+		if (bc(i - 1, j) == BC_DIR)
+		{
+			coeff_ij += inv_dxdx;
+		}
+		if (bc(i, j + 1) == BC_DIR)
+		{
+			coeff_ij += inv_dxdx;
+		}
+		if (bc(i, j - 1) == BC_DIR)
+		{
+			coeff_ij += inv_dxdx;
+		}
+		
+		gscoef.center = -coeff_ij;
+
+		if (gscoef.center != 0)
+		{
+			gscoef.inv_center = (T)1/(-coeff_ij);
+		}
+		else
+		{
+			gscoef.inv_center = (T)0;
+		}
+	}
+	END_GRID_ITERATION_2D;
+}
+
+void POISSON_SOLVER::GaussSeidelSmoothing(FIELD_STRUCTURE_2D<T>& solution, const FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& rhs, const int& max_itr, const int& thread_id)
+{
+	ARRAY_2D<T> &s_arr(solution.array_for_this);
+	const ARRAY_2D<int>& bc_arr(bc.array_for_this);
+	const ARRAY_2D<T>& rhs_arr(rhs.array_for_this);
+
+	GS_COEFFICIENTS *gscoef_val(gs_coefficients.array_for_this.values);
+
+	GRID_STRUCTURE_2D &grid(solution.partial_grids[thread_id]);
+	const int j_start(grid.j_start), j_end(grid.j_end), i_start(grid.i_start), i_end(grid.i_end);
+	
+	T sqr_res_sum((T)0), max_abs_res((T)0);
+	int num_full_cell(0);
+	
+	for (int itr = 0; itr < max_itr; itr++)
+	{
+		sqr_res_sum = (T)0;
+		max_abs_res = (T)0;
+		num_full_cell = 0;
+
+		// Gauss-Seidel Update
+		for (int j = j_start; j <= j_end; ++j)
+		{
+			for (int i = i_start; i <= i_end; ++i)
+			{
+				if (bc_arr(i, j) < 0)
+				{
+					continue;
+				}
+
+				const GS_COEFFICIENTS &gscoef(gs_coefficients.array_for_this(i, j));
+
+				const  T res(rhs_arr(i, j) - s_arr(i + 1, j)*gscoef.plus[0] - s_arr(i, j + 1)*gscoef.plus[1] - s_arr(i - 1, j)*gscoef.minus[0] - s_arr(i, j - 1)*gscoef.minus[1] - s_arr(i, j)*gscoef.center);
+		
+				s_arr(i, j) += res*gscoef.inv_center; // Solve Ax = b (instead of -Ax = -b)
+
+				sqr_res_sum += POW2(res);
+				max_abs_res = MAX(max_abs_res, abs(res));
+				num_full_cell++;
+			}
+		}
+		multithreading->SyncSum(thread_id, sqr_res_sum);
+		multithreading->SyncMax(thread_id, max_abs_res);
+		multithreading->SyncSum(thread_id, num_full_cell);
+		
+		BEGIN_HEAD_THREAD_WORK
+		{
+			cout << grid.dx << endl;
+			cout << "Residual : " << grid.dx*sqrt(sqr_res_sum) << endl;
+		}
+		END_HEAD_THREAD_WORK;
+
+		// We use a squared Euclidean Norm to check a convergence
+		if (sqr_res_sum/(T)num_full_cell <= sqr_tolerance)
+		{
+			cout << "Gauss-Seidel Method converges at " << itr << " iteration!" << endl;
+			break;
+		}
+		multithreading->Sync(thread_id);
+	}
+}
+
+void POISSON_SOLVER::CalculateResidual(FIELD_STRUCTURE_2D<T>& residual, const FIELD_STRUCTURE_2D<T>& solution, const FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& rhs, const int& thread_id)
+{
+	//NOTE : This method calculates residuals of fluid cells only.
+	//       Ghost values of pressure field should be filled before calling this method.
+
+	// Speedup constants
+	ARRAY_2D<T>& res_arr(residual.array_for_this);
+	const ARRAY_2D<int>& bc_arr(bc.array_for_this);
+	const ARRAY_2D<T>& s_arr(solution.array_for_this);
+	const ARRAY_2D<T>& rhs_arr(solution.array_for_this);
+	
+	BEGIN_GRID_ITERATION_2D(solution.partial_grids[thread_id])
+	{
+		if (bc_arr(i, j) < 0)
+		{
+			continue;
+		}
+
+		const GS_COEFFICIENTS &gscoef(gs_coefficients.array_for_this(i, j));
+
+		// This refers ghost values of solution field
+		res_arr(i, j) = rhs_arr(i, j) - s_arr(i + 1, j)*gscoef.plus[0] - s_arr(i, j + 1)*gscoef.plus[1] - s_arr(i - 1, j)*gscoef.minus[0] - s_arr(i, j - 1)*gscoef.minus[1] - s_arr(i, j)*gscoef.center;
 	}
 	END_GRID_ITERATION_2D;
 }

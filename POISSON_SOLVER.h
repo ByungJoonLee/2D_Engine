@@ -6,6 +6,7 @@
 #include "CG_METHOD.h"
 #include "PCG_METHOD.h"
 #include "BICGSTAB_METHOD.h"
+#include "GS_COEFFICIENTS.h"
 
 class POISSON_SOLVER
 {
@@ -16,10 +17,19 @@ public: // Essential Data
 	
 	int									ghost_width;
 
+	GRID_STRUCTURE_2D*					grid_ghost;
+	ARRAY<GRID_STRUCTURE_2D>*			partial_grids;
+
+public: // Temporary
+	int									num_levels;
+
 public: // For matrix-vector type solver
 	CSR_MATRIX<T>						A;
 	VECTOR_ND<T>						x;
 	VECTOR_ND<T>						b;
+
+public: // pre-computed matrix-free Gauss-Seidel multiplication coefficients for direct solvers
+	FIELD_STRUCTURE_2D<GS_COEFFICIENTS>	gs_coefficients;
 
 public: // Solver
 	LINEAR_SOLVER*						linear_solver;
@@ -45,6 +55,7 @@ public: // Constructors and Destructor
 
 public: // Initialization Functions
 	void Initialize(const T& tolerance_input, const int& max_itr_input, const int ghost_width_input, MULTITHREADING* multithreading_input);
+	void Initialize(const T& tolerance_input, const int& max_itr_input, GRID_STRUCTURE_2D* grid_ghost_input, const int ghost_width_input, ARRAY<GRID_STRUCTURE_2D>* partial_grids_input, int num_levels_input, MULTITHREADING* multithreading_input);
 	void InitializeLinearSolver(const POISSON_SOLVER_TYPE linear_solver_type);
 	
 	void InitializePressure(FIELD_STRUCTURE_1D<T>& pressure);
@@ -84,4 +95,9 @@ public: // Member Functions
 	void VectorToGrid(const VECTOR_ND<T>& x, FIELD_STRUCTURE_1D<T>& pressure, const FIELD_STRUCTURE_1D<int>& bc, const int& thread_id);
 	void VectorToGrid(const VECTOR_ND<T>& x, FIELD_STRUCTURE_2D<T>& pressure, const FIELD_STRUCTURE_2D<int>& bc);
 	void VectorToGrid(const VECTOR_ND<T>& x, FIELD_STRUCTURE_2D<T>& pressure, const FIELD_STRUCTURE_2D<int>& bc, const int& thread_id);
+
+	// For multigrid
+	void PrecomputeGSCoefficients(const FIELD_STRUCTURE_2D<int>& bc, const int& thread_id); 
+	void GaussSeidelSmoothing(FIELD_STRUCTURE_2D<T>& solution, const FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& rhs, const int& max_itr, const int& thread_id);
+	void CalculateResidual(FIELD_STRUCTURE_2D<T>& residual, const FIELD_STRUCTURE_2D<T>& solution, const FIELD_STRUCTURE_2D<int>& bc, const FIELD_STRUCTURE_2D<T>& rhs, const int& thread_id);
 };

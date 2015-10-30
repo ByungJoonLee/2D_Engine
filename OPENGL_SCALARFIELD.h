@@ -489,12 +489,12 @@ static void InitParam(OPENGL_SCALARFIELD* me, FIELD_STRUCTURE_2D<TT>* fu2d)
 {
 	if (fu2d)
 	{
-		me->min[OPENGL_SCALARFIELD::FIELD_X] = fu2d->i_start_g;
-		me->max[OPENGL_SCALARFIELD::FIELD_X] = fu2d->i_end_g;
+		me->min[OPENGL_SCALARFIELD::FIELD_X] = fu2d->i_start;
+		me->max[OPENGL_SCALARFIELD::FIELD_X] = fu2d->i_end;
 		me->index[OPENGL_SCALARFIELD::FIELD_X] = (me->min[OPENGL_SCALARFIELD::FIELD_X] + me->max[OPENGL_SCALARFIELD::FIELD_X])/2;
 
-		me->min[OPENGL_SCALARFIELD::FIELD_Y] = fu2d->j_start_g;
-		me->max[OPENGL_SCALARFIELD::FIELD_Y] = fu2d->j_end_g;
+		me->min[OPENGL_SCALARFIELD::FIELD_Y] = fu2d->j_start;
+		me->max[OPENGL_SCALARFIELD::FIELD_Y] = fu2d->j_end;
 		me->index[OPENGL_SCALARFIELD::FIELD_Y] = (me->min[OPENGL_SCALARFIELD::FIELD_Y] + me->max[OPENGL_SCALARFIELD::FIELD_Y])/2;
 	}
 }

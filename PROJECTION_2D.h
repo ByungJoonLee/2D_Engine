@@ -1232,6 +1232,37 @@ public: // Members Functions
 	{
 		if (CSF_model)
 		{
+			if (air_water_simulation)
+			{
+				BEGIN_GRID_ITERATION_2D(velocity_field.partial_grids[thread_id])
+				{
+					if (boundary_condition_array(i, j) < 0)
+					{
+						continue;
+					}
+
+					T& velocity_ij = velocity_field.array_for_this(i, j);
+
+					const T one_over_density_half_x = (T)1/((T)0.5*(projection_density_field(i, j) + projection_density_field(i - 1, j)));
+					const T one_over_density_half_y = (T)1/((T)0.5*(projection_density_field(i, j) + projection_density_field(i, j - 1)));
+
+					if (velocity_field.is_x_component == true)
+					{
+						velocity_ij -= dt*(pressure_field(i, j) - pressure_field(i - 1, j))*one_over_density_half_x*one_over_dx;
+
+						max_velocity_x = MAX(abs(velocity_ij), max_velocity_x);
+
+					}
+					if (velocity_field.is_y_component == true)
+					{
+						velocity_ij -= dt*(pressure_field(i, j) - pressure_field(i, j - 1))*one_over_density_half_y*one_over_dy;
+
+						max_velocity_y = MAX(abs(velocity_ij), max_velocity_y);
+					}
+				}
+				END_GRID_ITERATION_2D;
+			}
+
 			if (oil_water_simulation)
 			{
 				BEGIN_GRID_ITERATION_2D(velocity_field.partial_grids[thread_id])

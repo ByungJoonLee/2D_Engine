@@ -435,6 +435,24 @@ public: // Member Functions
 		y_max += variation.y;
 	}
 
+public: // For Multigrid
+	int RecommendMaxMultigridLevel(const int& lowest_level_res)
+	{
+		int min_res = MIN(i_res, j_res);
+		int max_level = 0;
+		while (true)
+		{
+			max_level++;
+			min_res /= 2;
+			if (min_res < lowest_level_res)
+			{
+				break;
+			}
+		}
+
+		return max_level;
+	}
+
 public: // For Multithreading
 	void SplitInYDirection(const int& num_threads, ARRAY<GRID_STRUCTURE_2D>& partial_grids);
 };

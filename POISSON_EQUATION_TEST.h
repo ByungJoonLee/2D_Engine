@@ -6,6 +6,7 @@
 #include "LEVELSET_2D.h"
 #include "POISSON_SOLVER.h"
 #include "ADVECTION_METHOD_2D.h"
+#include "MULTIGRID_METHOD.h"
 
 class POISSON_EQUATION_TEST
 {
@@ -45,9 +46,11 @@ public: // For 2D problem
 
 public: // Poisson Solver
 	POISSON_SOLVER				poisson_solver;
+	MULTIGRID_METHOD			*multigrid_poisson_solver;
 
 public: // Control Option
 	enum POISSON_SOLVER_TYPE    poisson_solver_type;
+	enum POISSON_SOLVER_TYPE	coarsest_level_poisson_solver_type;
 
 public: // Option for Boundary Condition
 	bool						Dirichlet_Boundary_Condition, Neumann_Boundary_Condition;
@@ -55,6 +58,9 @@ public: // Option for Boundary Condition
 public: // For CG/PCG
 	T							tolerance;
 	int							max_iteration;
+
+public: // For Multigrid
+	int							minimum_x_res;
 
 public: // Convenient variables and references - For 1D
 	GRID_STRUCTURE_1D			base_grid_1d;
@@ -76,11 +82,16 @@ public: // Error Norm
 
 public: // Constructor and Destructor
 	POISSON_EQUATION_TEST(void)
-		: interface_levelset_1d(0), interface_levelset_2d(0), multithreading(0), grid_1d(false), grid_2d(false)
+		: interface_levelset_1d(0), interface_levelset_2d(0), multithreading(0), grid_1d(false), grid_2d(false), multigrid_poisson_solver(0)
 	{}
 
 	~POISSON_EQUATION_TEST(void)
-	{}
+	{
+		if (poisson_solver_type == MULTIGRID)
+		{
+			DELETE_POINTER(multigrid_poisson_solver);
+		}
+	}
 
 public: // Initialization Function
 	void InitializeFromBlock(const SCRIPT_BLOCK& poisson_eqn_block, MULTITHREADING* multithreading_input)
@@ -89,6 +100,7 @@ public: // Initialization Function
 
 		tolerance = poisson_eqn_block.GetFloat("tolerance", (T)1e-4);
 		max_iteration = poisson_eqn_block.GetInteger("max_iteration", 30);
+		minimum_x_res = poisson_eqn_block.GetFloat("minimum_x_res", 64);
 
 		Dirichlet_Boundary_Condition = poisson_eqn_block.GetBoolean("Dirichlet_Boundary_Condition", (bool)false);
 		Neumann_Boundary_Condition = poisson_eqn_block.GetBoolean("Neumann_Boundary_Condition", (bool)false);
@@ -99,13 +111,28 @@ public: // Initialization Function
 		{
 			poisson_solver_type = CG;
 		}
+		else if (!strcmp(poisson_solver_type_input, "PCG"))
+		{
+			poisson_solver_type = PCG;
+		}
+		else if (!strcmp(poisson_solver_type_input, "MULTIGRID"))
+		{
+			poisson_solver_type = MULTIGRID;
+		}
 		else
 		{
 			poisson_solver_type = CG;
 		}
-		if (!strcmp(poisson_solver_type_input, "PCG"))
+
+		// For Multigrid
+		const char* coarsest_level_poisson_solver_type_input = poisson_eqn_block.GetString("coarsest_level_poisson_solver_type", "NULL");
+		if (!strcmp(coarsest_level_poisson_solver_type_input, "CG"))
 		{
-			poisson_solver_type = PCG;
+			coarsest_level_poisson_solver_type = CG;
+		}
+		else if (!strcmp(coarsest_level_poisson_solver_type_input, "PCG"))
+		{
+			coarsest_level_poisson_solver_type = PCG;
 		}
 		else
 		{
@@ -115,6 +142,7 @@ public: // Initialization Function
 		cout << "-------------------POISSON EQUATION TEST-------------------" << endl;
 		cout << "tolerance: " << tolerance << endl;
 		cout << "max_iteration: " << max_iteration << endl;
+		cout << "minimun_x_res: " << minimum_x_res << endl;
 
 		if (Neumann_Boundary_Condition)
 		{
@@ -142,6 +170,27 @@ public: // Initialization Function
 			cout << "poisson solver type: " << "PCG" << endl;
 			break;
 
+		case MULTIGRID:
+			cout << "poisson solver type: " << "MULTIGRID" << endl;
+			break;
+		default:
+			break;
+		}
+
+		switch (coarsest_level_poisson_solver_type)
+		{
+		case NO_SOLVER:
+			cout << "coarsest level poisson solver type: " << "NO SOLVER" << endl;
+			break;
+
+		case CG:
+			cout << "coarsest level poisson solver type: " << "CG" << endl;
+			break;
+
+		case PCG:
+			cout << "coarsest level poisson solver type: " << "PCG" << endl;
+			break;
+		
 		default:
 			break;
 		}
@@ -206,9 +255,33 @@ public: // Initialization Function
 			interface_levelset_2d->FillGhostCellsFromPointer(&(interface_levelset_2d->phi), false);
 		}
 		
-		// Initialize Poisson solvers
-		poisson_solver.Initialize(tolerance, max_iteration, 0, multithreading);
-		poisson_solver.InitializeLinearSolver(poisson_solver_type);
+		if (poisson_solver_type == MULTIGRID)
+		{
+			const int num_levels = base_grid_2d.RecommendMaxMultigridLevel(minimum_x_res);
+			
+			cout << "number of levels in multigrid: " << num_levels << endl;
+			
+			if (num_levels > 1)
+			{
+				DELETE_POINTER(multigrid_poisson_solver);
+				multigrid_poisson_solver = new MULTIGRID_METHOD(multithreading);
+				multigrid_poisson_solver->InitializeFromBlock(poisson_eqn_block);
+				multigrid_poisson_solver->Initialize(solution_2d, rhs_2d, boundary_condition_2d, interface_levelset_2d->signed_distance_field, coarsest_level_poisson_solver_type);
+				multigrid_poisson_solver->test_number = test_number;
+			}
+			else
+			{
+				poisson_solver_type = coarsest_level_poisson_solver_type;
+				poisson_solver.Initialize(tolerance, max_iteration, 0, multithreading);
+				poisson_solver.InitializeLinearSolver(poisson_solver_type);
+			}
+		}
+		else
+		{
+			// Initialize Poisson solvers
+			poisson_solver.Initialize(tolerance, max_iteration, 0, multithreading);
+			poisson_solver.InitializeLinearSolver(poisson_solver_type);
+		}
 	}
 
 public: // Solver
@@ -227,6 +300,11 @@ public: // Solver
 			{
 				cout << "L2 norm: " << l2_norm << endl;
 			}
+
+			if (test_number == 3)
+			{
+				cout << "L2 norm: " << l2_norm << endl;
+			}
 		}
 		END_HEAD_THREAD_WORK;
 		//ComputeErrorInMaxNorm(thread_id);
@@ -240,7 +318,26 @@ public: // Solver
 			{
 				T x_coor = true_solution_2d.x_min + i*true_solution_2d.dx, y_coor = true_solution_2d.y_min + j*true_solution_2d.dy;
 
-				true_solution_2d(i, j) = (T)1/POW2(PI)*sin(PI*x_coor)*sin(PI*y_coor);
+				true_solution_2d(i, j) = (POW2(x_coor) - POW2(POW2(x_coor)))*(POW2(POW2(y_coor)) - POW2(y_coor));
+			}
+			END_GRID_ITERATION_2D;
+		}
+		
+		if (test_number == 3)
+		{
+			BEGIN_GRID_ITERATION_2D(true_solution_2d.partial_grids_ghost[thread_id])
+			{
+				T x_coor = true_solution_2d.x_min + i*true_solution_2d.dx, y_coor = true_solution_2d.y_min + j*true_solution_2d.dy;
+				T interface_levelset = POW2(x_coor - 0.5) + POW2(y_coor - 0.5);
+				
+				if (interface_levelset <= POW2(0.25))
+				{
+					true_solution_2d(i, j) = exp(-POW2(x_coor) - POW2(y_coor));
+				}
+				else
+				{
+					true_solution_2d(i, j) = 0;
+				}
 			}
 			END_GRID_ITERATION_2D;
 		}
@@ -261,13 +358,28 @@ public: // Solver
 			beta_2d.FillGhostCellsFrom(beta_2d.array_for_this, false, thread_id);
 			multithreading->Sync(thread_id);
 			
-			if (test_number == 0)
+			if (poisson_solver_type == MULTIGRID)
 			{
-				poisson_solver.Solve(solution_2d, boundary_condition_2d, rhs_2d, thread_id);
+				// For test
+				if (test_number == 0)
+				{
+					multigrid_poisson_solver->Solve(thread_id);
+				}
+				if (test_number == 3)
+				{
+					multigrid_poisson_solver->Solve(thread_id);
+				}
 			}
 			else
 			{
-				poisson_solver.Solve(solution_2d,beta_2d, boundary_condition_2d, rhs_2d, *interface_levelset_2d, jc_on_solution_2d, jc_on_derivative_2d);
+				if (test_number == 0)
+				{
+					poisson_solver.Solve(solution_2d, boundary_condition_2d, rhs_2d, thread_id);
+				}
+				else
+				{
+					poisson_solver.Solve(solution_2d,beta_2d, boundary_condition_2d, rhs_2d, *interface_levelset_2d, jc_on_solution_2d, jc_on_derivative_2d);
+				} 
 			}
 			
 			//poisson_solver.Solve(solution_2d, beta_2d, boundary_condition_2d, rhs_2d, beta_2d, *interface_levelset_2d, jc_on_solution_2d, jc_on_derivative_2d, thread_id);
@@ -479,7 +591,7 @@ public: // Solver
 			{
 				T x_coor = rhs_2d.x_min + i*rhs_2d.dx, y_coor = rhs_2d.y_min + j*rhs_2d.dy;
 
-				rhs_2d(i, j) = (T)2*sin(PI*x_coor)*sin(PI*y_coor);
+				rhs_2d(i, j) = -(T)2*((1 - 6*POW2(x_coor))*POW2(y_coor)*(1 - POW2(y_coor)) + (1 - 6*POW2(y_coor))*POW2(x_coor)*(1 - POW2(x_coor)));
 			}
 			END_GRID_ITERATION_2D;
 		}
@@ -591,10 +703,16 @@ public: // Member Functions
 			BEGIN_GRID_ITERATION_2D(bc_input.partial_grids_ghost[thread_id])
 			{
 				// Speed-up variable
-				if (i < grid.i_start || i > grid.i_end || j < grid.j_start || j > grid.j_end)
+				if (i <= grid.i_start || i >= grid.i_end || j <= grid.j_start || j >= grid.j_end)
 				{
 					bc_array(i, j) = BC_DIR;
 					
+					if (test_number == 0)
+					{
+						T x_coor = bc_input.x_min + i*bc_input.dx, y_coor = bc_input.y_min + j*bc_input.dy;
+						pressure_input(i, j) = 0;//(POW2(x_coor) - POW2(POW2(x_coor)))*(POW2(POW2(y_coor)) - POW2(y_coor));
+					}
+
 					if (test_number == 5)
 					{
 						T x_coor = bc_input.x_min + i*bc_input.dx, y_coor = bc_input.y_min + j*bc_input.dy;
@@ -645,6 +763,15 @@ public: // Member Functions
 		END_HEAD_THREAD_WORK;
 		
 		if (test_number == 0)
+		{
+			BEGIN_GRID_ITERATION_2D(solution_2d.partial_grids[thread_id])
+			{
+				l2_norm += POW2(solution_2d(i, j) - true_solution_2d(i, j))*solution_2d.grid.dx2;
+			}
+			END_GRID_ITERATION_SUM(l2_norm);
+		}
+
+		if (test_number == 3)
 		{
 			BEGIN_GRID_ITERATION_2D(solution_2d.partial_grids[thread_id])
 			{

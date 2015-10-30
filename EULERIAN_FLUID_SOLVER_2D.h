@@ -49,6 +49,13 @@ public: // Dynamic Data
 	// Sub-Function for Reinitialization
 	FIELD_STRUCTURE_2D<T>           sign_function;
 	FIELD_STRUCTURE_2D<T>           phi_0;
+
+	// Sub-Function for CSF model
+	FIELD_STRUCTURE_2D<T>			density_x, density_y, normal_x, normal_y;
+	FIELD_STRUCTURE_2D<T>			delta_c, delta_l, delta_d;
+	FIELD_STRUCTURE_2D<T>			phi_c, phi_l, phi_d, phi_x, phi_y;
+	FIELD_STRUCTURE_2D<T>			curvature_x, curvature_y;
+
 public: // Ghost Fields
 	FIELD_STRUCTURE_2D<T>			scalar_field_ghost;
 	FIELD_STRUCTURE_2D<VT>			vector_field_ghost;
@@ -113,9 +120,6 @@ public: // CSF Model
 public: // MAC grid
 	bool							use_mac_grid;
 
-public: // Option for time marching
-	bool							use_rk_3rd, use_rk_3rd_for_reinitialization;
-	
 public: // Speed up variable
 	int								i_res_x, j_res_x, i_res_y, j_res_y;
 	int								i_start_x, j_start_x, i_end_x, j_end_x, i_start_y, j_start_y, i_end_y, j_end_y;
@@ -136,8 +140,7 @@ public: // Constructor and Destructor
 		is_velocity_advection_active(false), is_sourcing_active(false), is_projection_active(false), is_levelset_advection_active(false), is_viscosity_active(false),
 		fastsweeping_reinitialization(false), sussmanstyle_reinitialization(false), 
 		use_delta_function_formulation(false), use_jump_condition_on_viscosity(false), 
-		CSF_model(false), is_vertical(false), is_parallel(false), 
-		use_rk_3rd(false), use_rk_3rd_for_reinitialization(false), use_mac_grid(false),
+		CSF_model(false), is_vertical(false), is_parallel(false), use_mac_grid(false),
 		multithreading(0), order_for_time_advancing((int)1), test_number((int)1)
 	{}
 
@@ -211,6 +214,7 @@ public: // Initialization Functions
 			water_density = 1;
 			air_density = 1;
 		}
+
 		surface_tension = fluid_solver_block.GetFloat("surface_tension", (T)1);
 
 		// Dimensionless Form
@@ -247,13 +251,6 @@ public: // Initialization Functions
 
 		// Option for surface tension term
 		CSF_model = fluid_solver_block.GetBoolean("CSF_model", (bool)false);
-
-		// Time marching
-		use_rk_3rd = fluid_solver_block.GetBoolean("use_rk_3rd", (bool)false);
-		use_rk_3rd_for_reinitialization = fluid_solver_block.GetBoolean("use_rk_3rd_for_reinitialization", (bool)false);
-
-		// MAC grid
-		use_mac_grid = fluid_solver_block.GetBoolean("use_mac_grid", (bool)false);
 
 		cout << "---------------FLUID SOLVER VARIABLES---------------" << endl;
 		cout << "Ghost width : " << ghost_width << endl;
@@ -298,24 +295,6 @@ public: // Initialization Functions
 			cout << "Time advancing: Runge-Kutta 3rd" << endl;
 		}
 
-		if (use_rk_3rd)
-		{
-			cout << "Use RK 3rd : true" << endl;
-		}
-		else
-		{
-			cout << "Use RK 3rd : false" << endl;
-		}
-
-		if (use_rk_3rd_for_reinitialization)
-		{
-			cout << "Use RK 3rd for Reinitialization: true" << endl;
-		}
-		else
-		{
-			cout << "Use RK 3rd for Reinitialization: false" << endl;
-		}
-
 		if (fastsweeping_reinitialization)
 		{
 			cout << "Reinitialized by Fast Sweeping Method: true" << endl;
@@ -332,6 +311,15 @@ public: // Initialization Functions
 		else
 		{
 			cout << "Reinitialized by SussmanStyle: false" << endl;
+		}
+
+		if (CSF_model)
+		{
+			cout << "CSF model : true" << endl;
+		}
+		else
+		{
+			cout << "CSF model : false" << endl;
 		}
 
 		if (air_water_simulation)
@@ -404,6 +392,25 @@ public: // Initialization Functions
 		DELETE_POINTER(vortex_levelset);
 		vortex_levelset = new LEVELSET_2D();
 		vortex_levelset->Initialize(base_grid, 2, multithreading);
+
+		// Initialize sub functions for CSF model
+		density_x.Initialize(water_velocity_field_mac_x->grid, true, false, 2, multithreading);
+		density_y.Initialize(water_velocity_field_mac_y->grid, true, false, 2, multithreading);
+		normal_x.Initialize(water_velocity_field_mac_x->grid, true, false, 2, multithreading);
+		normal_y.Initialize(water_velocity_field_mac_y->grid, true, false, 2, multithreading);
+		
+		delta_c.Initialize(water_levelset->grid, true, false, 2, multithreading);
+		delta_l.Initialize(water_levelset->grid, true, false, 2, multithreading);
+		delta_d.Initialize(water_levelset->grid, true, false, 2, multithreading);
+
+		phi_c.Initialize(water_levelset->grid, true, false, 2, multithreading);
+		phi_l.Initialize(water_levelset->grid, true, false, 2, multithreading);
+		phi_d.Initialize(water_levelset->grid, true, false, 2, multithreading);
+		phi_x.Initialize(water_velocity_field_mac_x->grid, true, false, 2, multithreading);
+		phi_y.Initialize(water_velocity_field_mac_y->grid, true, false, 2, multithreading);
+
+		curvature_x.Initialize(water_velocity_field_mac_x->grid, true, false, 2, multithreading);
+		curvature_y.Initialize(water_velocity_field_mac_y->grid, true, false, 2, multithreading);
 
 		// Initialize the values for MAC grid
 		if (air_water_simulation)
@@ -681,6 +688,8 @@ public: // Initialization Functions
 		
 		sign_function.Initialize(water_levelset->signed_distance_field.grid, 3, multithreading);
 
+		
+		
 		// Initialize Velocity for the bifurcation test
 		if (bifurcation_test)
 		{
@@ -2082,7 +2091,7 @@ public: // Simulation Steps
 						
 		if (CSF_model)
 		{
-			ApplySurfaceTension(dt);
+			ApplySurfaceTension(dt, thread_id);
 			water_projection->CSF_model = true;
 		}
 	}
@@ -2505,6 +2514,30 @@ public:	// Sourcing Functions
 		}
 	}
 
+	void HeavisideFunction(FIELD_STRUCTURE_2D<T>& phi, const T& epsilon, FIELD_STRUCTURE_2D<T>& heaviside, const int& thread_id)
+	{
+		int i(0), j(0);
+		
+		T one_over_epsilon = 1/(T)epsilon, one_over_pi = 1/(T)PI;
+		
+		BEGIN_GRID_ITERATION_2D(heaviside.partial_grids[thread_id])
+		{
+			if (phi(i, j) < -epsilon)
+			{
+				heaviside(i, j) = 0;
+			}
+			else if (phi(i, j) > epsilon)
+			{
+				heaviside(i, j) = 1;
+			}
+			else
+			{
+				heaviside(i, j) = (T)0.5 + (T)0.5*phi(i, j)*one_over_epsilon + (T)0.5*one_over_pi*sin((T)PI*phi(i, j)*one_over_epsilon);
+			}
+		}
+		END_GRID_ITERATION_2D;
+	}
+
 	void DeltaFunction(FIELD_STRUCTURE_2D<T>& phi, const T& epsilon, FIELD_STRUCTURE_2D<T>& delta)
 	{
 		int i(0), j(0);
@@ -2529,6 +2562,30 @@ public:	// Sourcing Functions
 		}
 	}
 	
+	void DeltaFunction(FIELD_STRUCTURE_2D<T>& phi, const T& epsilon, FIELD_STRUCTURE_2D<T>& delta, const int& thread_id)
+	{
+		int i(0), j(0);
+		
+		T one_over_epsilon = 1/(T)epsilon;
+
+		BEGIN_GRID_ITERATION_2D(delta.partial_grids[thread_id])
+		{
+			if (phi(i, j) < -epsilon)
+			{
+				delta(i, j) = 0;
+			}
+			else if (phi(i, j) >= -epsilon && phi(i, j) <= epsilon)
+			{
+				delta(i, j) = (T)0.5*one_over_epsilon + (T)0.5*one_over_epsilon*cos(PI*phi(i, j)*one_over_epsilon);
+			}
+			else
+			{
+				delta(i, j) = 0;
+			}
+		}
+		END_GRID_ITERATION_2D;
+	}
+
 	void DetermineViscosityField(FIELD_STRUCTURE_2D<T>& phi, const T& epsilon, FIELD_STRUCTURE_2D<T>& viscosity)	
 	{
 		int i(0), j(0);
@@ -2575,6 +2632,32 @@ public:	// Sourcing Functions
 			}
 		}	
 		density.FillGhostCellsFrom(density.array_for_this, true);
+	}
+	
+	void DetermineDensityField(FIELD_STRUCTURE_2D<T>& phi, const T& epsilon, FIELD_STRUCTURE_2D<T>& density, const int& thread_id)	
+	{
+		int i(0), j(0);
+		const int i_start(density.i_start), i_end(density.i_end), j_start(density.j_start), j_end(density.j_end);
+		
+		FIELD_STRUCTURE_2D<T> heaviside_phi;
+		heaviside_phi.Initialize(density.grid, 2, true, false, multithreading);
+
+		HeavisideFunction(phi, epsilon, heaviside_phi, thread_id);
+
+		BEGIN_GRID_ITERATION_2D(density.partial_grids[thread_id])
+		{
+			if (water_projection->air_bubble_rising == true)
+			{
+				density(i, j) = air_density + (water_density - air_density)*heaviside_phi(i, j);
+			}
+			if (water_projection->water_drop == true)
+			{
+				density(i, j) = water_density + (air_density - water_density)*heaviside_phi(i, j);
+			}
+		}
+		END_GRID_ITERATION_2D;
+
+		density.FillGhostCellsFrom(density.array_for_this, true, thread_id);
 	}
 
 	void ComputeJumpconitionMatrixForViscosity(FIELD_STRUCTURE_2D<T>& J11, FIELD_STRUCTURE_2D<T>& J12, FIELD_STRUCTURE_2D<T>& J21, FIELD_STRUCTURE_2D<T>& J22)
@@ -3211,17 +3294,90 @@ public:	// Sourcing Functions
 		}
 	}
 
+	void ApplySurfaceTension(const T& dt, const int& thread_id)
+	{
+		if (air_water_simulation)
+		{
+			BEGIN_GRID_ITERATION_2D(water_velocity_field_mac_x->partial_grids[thread_id])
+			{
+				normal_x(i, j) = (water_levelset->phi(i, j) - water_levelset->phi(i - 1, j))*water_levelset->grid.one_over_dx;	
+			}
+			END_GRID_ITERATION_2D;
+
+			BEGIN_GRID_ITERATION_2D(water_velocity_field_mac_y->partial_grids[thread_id])
+			{
+				normal_y(i, j) = (water_levelset->phi(i, j) - water_levelset->phi(i, j - 1))*water_levelset->grid.one_over_dy;
+			}
+			END_GRID_ITERATION_2D;
+
+			BEGIN_GRID_ITERATION_2D(water_velocity_field_mac_x->partial_grids[thread_id])
+			{
+				phi_x(i, j) = (T)0.5*(water_levelset->arr(i, j) + water_levelset->arr(i - 1, j));
+			}
+			END_GRID_ITERATION_2D;
+
+			BEGIN_GRID_ITERATION_2D(water_velocity_field_mac_y->partial_grids[thread_id])
+			{
+				phi_y(i, j) = (T)0.5*(water_levelset->arr(i, j) + water_levelset->arr(i, j - 1));
+			}
+			END_GRID_ITERATION_2D;
+
+			DetermineDensityField(phi_x, epsilon_for_mollification, density_x, thread_id);
+			DetermineDensityField(phi_y, epsilon_for_mollification, density_y, thread_id);
+
+			water_levelset->FillGhostCellsContinuousDerivativesFrom(water_levelset->arr, true, thread_id);
+
+			BEGIN_GRID_ITERATION_2D(water_levelset->partial_grids[thread_id])
+			{
+				phi_c(i, j) = water_levelset->arr(i, j);
+				phi_l(i, j) = water_levelset->arr(i - 1, j);
+				phi_d(i, j) = water_levelset->arr(i, j - 1);
+			}
+			END_GRID_ITERATION_2D;
+
+			DeltaFunction(phi_c, epsilon_for_mollification, delta_c, thread_id);
+			DeltaFunction(phi_l, epsilon_for_mollification, delta_l, thread_id);
+			DeltaFunction(phi_d, epsilon_for_mollification, delta_d, thread_id);
+	
+			water_levelset->ComputeCurvatures();
+	
+			water_levelset->curvature.FillGhostCellsContinuousDerivativesFrom(water_levelset->curvature.array_for_this, false, thread_id);
+	
+			BEGIN_GRID_ITERATION_2D(curvature_x.partial_grids[thread_id])
+			{
+				curvature_x(i, j) = (T)0.5*(water_levelset->curvature(i, j) + water_levelset->curvature(i - 1, j));
+			}
+			END_GRID_ITERATION_2D;
+
+			BEGIN_GRID_ITERATION_2D(curvature_y.partial_grids[thread_id])
+			{
+				curvature_y(i, j) = (T)0.5*(water_levelset->curvature(i, j) + water_levelset->curvature(i, j - 1));
+			}
+			END_GRID_ITERATION_2D;
+			
+			BEGIN_GRID_ITERATION_2D(water_velocity_field_mac_x->partial_grids[thread_id])
+			{
+				T delta = (T)0.5*(delta_c(i, j) + delta_l(i, j));
+				T surf_x = dt*surface_tension*curvature_x(i, j)*delta*normal_x(i, j)/density_x(i, j);
+
+				water_velocity_field_mac_x->array_for_this(i, j) = water_velocity_field_mac_x->array_for_this(i, j) + surf_x;
+			}
+			END_GRID_ITERATION_2D;
+
+			BEGIN_GRID_ITERATION_2D(water_velocity_field_mac_y->partial_grids[thread_id])
+			{
+				T delta = (T)0.5*(delta_c(i, j) + delta_d(i, j));
+
+				water_velocity_field_mac_y->array_for_this(i, j) = water_velocity_field_mac_y->array_for_this(i, j) + dt*surface_tension*curvature_y(i, j)*delta*normal_y(i, j)/density_y(i, j); 
+			}
+			END_GRID_ITERATION_2D;
+		}
+	}
+
 	void ApplySurfaceTension(const T& dt)
 	{
 		if (air_water_simulation)
 		{
-			
-			FIELD_STRUCTURE_2D<T> density_x, density_y, normal_x, normal_y;
-			density_x.Initialize(water_velocity_field_mac_x->grid, 2);
-			density_y.Initialize(water_velocity_field_mac_y->grid, 2);
-			normal_x.Initialize(water_velocity_field_mac_x->grid, 2);
-			normal_y.Initialize(water_velocity_field_mac_y->grid, 2);
-			
 			GRID_ITERATION_2D(water_velocity_field_mac_x->grid)
 			{
 				normal_x(i, j) = (water_levelset->phi(i, j) - water_levelset->phi(i - 1, j))*water_levelset->grid.one_over_dx;	
@@ -3231,18 +3387,6 @@ public:	// Sourcing Functions
 			{
 				normal_y(i, j) = (water_levelset->phi(i, j) - water_levelset->phi(i, j - 1))*water_levelset->grid.one_over_dy;
 			}
-			
-			FIELD_STRUCTURE_2D<T> delta_c, delta_l, delta_d;
-			delta_c.Initialize(water_levelset->grid, 2);
-			delta_l.Initialize(water_levelset->grid, 2);
-			delta_d.Initialize(water_levelset->grid, 2);
-
-			FIELD_STRUCTURE_2D<T> phi_c, phi_l, phi_d, phi_x, phi_y;
-			phi_c.Initialize(water_levelset->grid, 2);
-			phi_l.Initialize(water_levelset->grid, 2);
-			phi_d.Initialize(water_levelset->grid, 2);
-			phi_x.Initialize(water_velocity_field_mac_x->grid, 2);
-			phi_y.Initialize(water_velocity_field_mac_y->grid, 2);
 			
 			GRID_ITERATION_2D(water_velocity_field_mac_x->grid)
 			{
@@ -3274,10 +3418,6 @@ public:	// Sourcing Functions
 	
 			water_levelset->curvature.FillGhostCellsContinuousDerivativesFrom(water_levelset->curvature.array_for_this, false);
 	
-			FIELD_STRUCTURE_2D<T> curvature_x, curvature_y;
-			curvature_x.Initialize(water_velocity_field_mac_x->grid, 2);
-			curvature_y.Initialize(water_velocity_field_mac_y->grid, 2);
-	
 			GRID_ITERATION_2D(curvature_x.grid)
 			{
 				curvature_x(i, j) = (T)0.5*(water_levelset->curvature(i, j) + water_levelset->curvature(i - 1, j));
@@ -3303,7 +3443,7 @@ public:	// Sourcing Functions
 				water_velocity_field_mac_y->array_for_this(i, j) = water_velocity_field_mac_y->array_for_this(i, j) + dt*surface_tension*curvature_y(i, j)*delta*normal_y(i, j)/density_y(i, j); 
 			}
 		}
-		if (oil_water_simulation)
+		/*if (oil_water_simulation)
 		{
 			T one_over_weber = 1/(T)We;
 
@@ -3370,7 +3510,7 @@ public:	// Sourcing Functions
 
 				water_velocity_field_mac_y->array_for_this(i, j) += dt*surf;
 			}
-		}	
+		}	*/
 	}
 	
 public: // Functions related to the time

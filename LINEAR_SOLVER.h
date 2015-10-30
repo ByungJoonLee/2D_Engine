@@ -3,6 +3,7 @@
 #include "FIELD_STRUCTURE_1D.h"
 #include "FIELD_STRUCTURE_2D.h"
 #include "CSR_MATRIX.h"
+#include "GS_COEFFICIENTS.h"
 
 class LINEAR_SOLVER
 {

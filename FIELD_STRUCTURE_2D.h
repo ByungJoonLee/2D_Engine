@@ -317,6 +317,17 @@ public: // Member Functions
 		}
 	}
 
+	void AssignAllValueGhost(const int& thread_id, const TT& value)
+	{
+		PREPARE_FOR_1D_ITERATION(array_for_this.ij_res);
+
+		BEGIN_1D_ITERATION
+		{
+			array_for_this.values[p] = value;
+		}
+		END_1D_ITERATION;
+	}
+
 	template<class TTT>
 	void AssignAllValue(const ARRAY_2D<TTT>& arr, const TTT& value)
 	{
@@ -782,6 +793,920 @@ public: // Functions filling the ghost cell
 	}
 };
 
+static void Sampling(MULTITHREADING* multithreading, const FIELD_STRUCTURE_2D<T>& from_input, FIELD_STRUCTURE_2D<T>& to_input, const int& thread_id)
+{
+	ARRAY_2D<T> &to_arr(to_input.array_for_this);
+
+	BEGIN_GRID_ITERATION_2D(to_input.partial_grids[thread_id])
+	{
+		to_arr(i, j) = from_input.BilinearInterpolation(to_input.CellCenter(i, j));
+	}
+	END_GRID_ITERATION_2D;
+}
+
+static void Injection(MULTITHREADING* multithreading, const FIELD_STRUCTURE_2D<T>& from_input, FIELD_STRUCTURE_2D<T>& to_input, const int& thread_id)
+{
+	const ARRAY_2D<T> &from_arr(from_input.array_for_this);
+	ARRAY_2D<T> &to_arr(to_input.array_for_this);
+
+	BEGIN_GRID_ITERATION_2D(to_input.partial_grids_ghost[thread_id])
+	{
+		to_arr(i, j) = from_arr(2*i, 2*j);
+	}
+	END_GRID_ITERATION_2D;
+}
+
+static void FullWeighting(MULTITHREADING* multithreading, const FIELD_STRUCTURE_2D<T>& from_input, FIELD_STRUCTURE_2D<T>& to_input, const int& thread_id)
+{
+	const ARRAY_2D<T> &from_arr(from_input.array_for_this);
+	ARRAY_2D<T> &to_arr(to_input.array_for_this);
+
+	BEGIN_GRID_ITERATION_2D(to_input.partial_grids[thread_id])
+	{
+		to_arr(i, j) = (T)1/16*(from_arr(2*i - 1, 2*j - 1) +from_arr(2*i - 1, 2*j + 1) + from_arr(2*i + 1, 2*j - 1) + from_arr(2*i + 1, 2*j + 1) + 2*(from_arr(2*i, 2*j - 1) + from_arr(2*i, 2*j + 1) + from_arr(2*i - 1, 2*j) + from_arr(2*i + 1, 2*j)) + 4*from_arr(2*i, 2*j));
+	}
+	END_GRID_ITERATION_2D;
+}
+
+static void DownSampling(MULTITHREADING* multithreading, const FIELD_STRUCTURE_2D<T>& from_input, FIELD_STRUCTURE_2D<T>& to_input, const int& thread_id)
+{
+	const ARRAY_2D<T> &from_arr(from_input.array_for_this);
+	ARRAY_2D<T> &to_arr(to_input.array_for_this);
+
+	BEGIN_GRID_ITERATION_2D(to_input.partial_grids[thread_id])
+	{
+		to_arr(i, j) = (from_arr(2*i, 2*j) +from_arr(2*i, 2*j + 1) + from_arr(2*i + 1, 2*j) + from_arr(2*i + 1, 2*j + 1))/(T)4;
+	}
+	END_GRID_ITERATION_2D;
+}
+
+static void UpSampling(MULTITHREADING* multithreading, const int& thread_id, const FIELD_STRUCTURE_2D<T>& from_input, FIELD_STRUCTURE_2D<T>& to_input)
+{
+	//NOTE : THIS IS OPIMIZED, ADDITIVE SAMPLING METHOD WHICH IS TARGETTING 8-TO-1 COARSENED GRID.
+	//Evaluate : to_input(fine) += from_input(coarser)	
+	ARRAY_2D<T> &to_arr(to_input.array_for_this);
+	const ARRAY_2D<T> &from_arr(from_input.array_for_this);
+
+	int remainder_i, remainder_j;
+	
+	BEGIN_GRID_ITERATION_2D(to_input.partial_grids[thread_id])
+	{
+		// As partial grid of FIELD_UNIFORM_3D includes only positive indice of grid, (int) casting is valid.
+		remainder_i = i%2;
+		remainder_j = j%2;
+	
+		if (remainder_i == 0)
+		{
+			if (remainder_j == 0)
+			{
+				to_arr(i, j) = from_arr(i/2, j/2);
+			}
+			else
+			{
+				to_arr(i, j) = (T)0.5*(from_arr(i/2, (int)j/2) + from_arr(i/2, (int)j/2 + 1));
+			}
+		}
+		else
+		{
+			if (remainder_j == 0)
+			{
+				to_arr(i, j) = (T)0.5*(from_arr((int)i/2, j/2) + from_arr((int)i/2 + 1, j/2));
+			}
+			else
+			{
+				to_arr(i, j) = (T)0.25*(from_arr((int)i/2, (int)j/2) + from_arr((int)i/2 + 1, (int)j/2) + from_arr((int)i/2, (int)j/2 + 1) + from_arr((int)i/2 + 1, (int)j/2 + 1));
+			}
+		}
+		
+		/*if(remainder_i==0){weight_i = (T)0.25; one_minus_weight_i = (T)0.75;}
+		else              {weight_i = (T)0.75; one_minus_weight_i = (T)0.25;}
+		if(remainder_j==0){weight_j = (T)0.25; one_minus_weight_j = (T)0.75;}
+		else              {weight_j = (T)0.75; one_minus_weight_j = (T)0.25;}
+				
+		min_i = (int)(i/2) - 1 + remainder_i;
+		min_j = (int)(j/2) - 1 + remainder_j;
+		
+		to_arr(i,j) += (from_arr(min_i,  min_j)*weight_i*weight_j + from_arr(min_i,  min_j + 1)*weight_i*one_minus_weight_j* + from_arr(min_i + 1,min_j)*one_minus_weight_i*weight_j + from_arr(min_i + 1, min_j + 1)*one_minus_weight_i*one_minus_weight_j);		*/
+	}
+	END_GRID_ITERATION_2D;
+}
+
+static void AdditiveSampling(MULTITHREADING* multithreading, const int& thread_id, const FIELD_STRUCTURE_2D<T>& from_input, FIELD_STRUCTURE_2D<T>& to_input)
+{
+	//NOTE : THIS IS OPIMIZED, ADDITIVE SAMPLING METHOD WHICH IS TARGETTING 8-TO-1 COARSENED GRID.
+	//Evaluate : to_input(fine) += from_input(coarser)	
+	ARRAY_2D<T> &to_arr(to_input.array_for_this);
+	const ARRAY_2D<T> &from_arr(from_input.array_for_this);
+
+	int remainder_i(0), remainder_j(0);
+	
+	BEGIN_GRID_ITERATION_2D(to_input.partial_grids[thread_id])
+	{
+		// As partial grid of FIELD_UNIFORM_3D includes only positive indice of grid, (int) casting is valid.
+		remainder_i = i%2;
+		remainder_j = j%2;
+	
+		if (remainder_i == 0)
+		{
+			if (remainder_j == 0)
+			{
+				to_arr(i, j) += from_arr(i/2, j/2);
+			}
+			else
+			{
+				to_arr(i, j) += (T)0.5*(from_arr(i/2, (int)j/2) + from_arr(i/2, (int)j/2 + 1));
+			}
+		}
+		else
+		{
+			if (remainder_j == 0)
+			{
+				to_arr(i, j) += (T)0.5*(from_arr((int)i/2, j/2) + from_arr((int)i/2 + 1, j/2));
+			}
+			else
+			{
+				to_arr(i, j) += (T)0.25*(from_arr((int)i/2, (int)j/2) + from_arr((int)i/2 + 1, (int)j/2) + from_arr((int)i/2, (int)j/2 + 1) + from_arr((int)i/2 + 1, (int)j/2 + 1));
+			}
+		}
+	}
+	END_GRID_ITERATION_2D;
+}
+
+static void AdditiveSampling(MULTITHREADING* multithreading, const int& thread_id, const FIELD_STRUCTURE_2D<T>& from_input, FIELD_STRUCTURE_2D<T>& to_input, const FIELD_STRUCTURE_2D<T>& interface_levelset_input)
+{
+	//NOTE : THIS IS OPIMIZED, ADDITIVE SAMPLING METHOD WHICH IS TARGETTING 8-TO-1 COARSENED GRID.
+	//Evaluate : to_input(fine) += from_input(coarser)	
+	ARRAY_2D<T> &to_arr(to_input.array_for_this);
+	const ARRAY_2D<T> &from_arr(from_input.array_for_this);
+	const ARRAY_2D<T> &larr(interface_levelset_input.array_for_this);
+
+	// Speed-up variables
+	T dx(from_input.dx), dy(from_input.dy), x_min(from_input.x_min), y_min(from_input.y_min);
+
+	int remainder_i(0), remainder_j(0);
+	
+	BEGIN_GRID_ITERATION_2D(from_input.partial_grids[thread_id])
+	{
+		/*if (i == from_input.i_end)
+		{
+			continue;
+		}
+		
+		if (j == from_input.j_end)
+		{
+			continue;
+		}*/
+		
+		to_arr(2*i, 2*j) += from_arr(i, j)/*, to_arr(2*i + 2, 2*j) += from_arr(i + 1, j), to_arr(2*i, 2*j + 2) += from_arr(i, j + 1), to_arr(2*i + 2, 2*j + 2) += from_arr(i + 1, j + 1)*/;
+		
+		// 1st Region
+		if (larr(i, j) <= 0 && larr(i + 1, j) > 0 && larr(i, j + 1) > 0 && larr(i + 1, j + 1) > 0)
+		{
+			// Around the interface node
+			T Gamma_x = x_min + i*dx + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i+1,j)));
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j) += Weight_x*from_arr(i+1,j);
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + 2*i*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j) += Weight_x*from_arr(i,j);
+			}
+
+			T Gamma_y = y_min + j*dy + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i,j+1)));
+			if(Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y);
+				to_input(2*i, 2*j+1) += Weight_y*from_arr(i,j+1);
+			}
+			else if(Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + 2*j*to_input.dy - Gamma_y);
+				to_input(2*i, 2*j+1) += Weight_y*from_arr(i,j);
+			}
+					
+			// Out of the interface node
+			to_input(2*i+1,2*j+2) += (T)1/2*(from_arr(i,j+1) + from_arr(i+1,j+1));
+			to_input(2*i+2,2*j+1) += (T)1/2*(from_arr(i+1,j+1) + from_arr(i+1,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				to_input(2*i+1,2*j+1) += (T)1/4*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i, 2*j+1));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i+1,j));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i,j+1));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j+1));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+		}
+		// 2nd Region
+		else if(larr(i,j) > 0 && larr(i+1,j) <= 0 && larr(i,j+1) > 0 && larr(i+1,j+1) > 0)
+		{
+			// Around the interface node
+			T Gamma_x = x_min + i*dx + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i+1,j)));
+			if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + 2*i*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j) += Weight_x*from_arr(i,j);
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j) += Weight_x*from_arr(i+1,j);
+			}
+					
+			T Gamma_y = y_min + j*dy + abs(larr(i+1,j))/(abs(larr(i+1,j))+abs(larr(i+1,j+1)));
+			if(Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y);
+				to_input(2*i+2, 2*j+1) += Weight_y*from_arr(i+1,j+1);
+			}
+			else if(Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + 2*j*to_input.dy - Gamma_y);
+				to_input(2*i+2, 2*j+1) += Weight_y*from_arr(i+1,j);
+			}
+					
+			// Out of the interface node
+			to_input(2*i+1,2*j+2) += (T)1/2*(from_arr(i,j+1) + from_arr(i+1,j+1));
+			to_input(2*i,2*j+1) += (T)1/2*(from_arr(i,j+1) + from_arr(i,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i,j));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2 ))*(to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				to_input(2*i+1,2*j+1) += (T)1/4*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i, 2*j+1));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i+1,j+1));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2)+to_input(2*i+1,2*j));
+			}
+		}	
+
+		// 3rd Region
+		else if(larr(i,j) > 0 && larr(i+1,j) > 0 && larr(i,j+1) <= 0 && larr(i+1,j+1) > 0)
+		{
+			// Around the interface node
+			T Gamma_x = x_min + i*dx + abs(larr(i,j+1))/(abs(larr(i,j+1))+abs(larr(i+1,j+1)));
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j+2) += Weight_x*from_arr(i+1,j+1);
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + 2*i*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j+2) += Weight_x*from_arr(i,j+1);
+			}
+
+			T Gamma_y = y_min + j*dy + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i,j+1)));
+			if(Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y);
+				to_input(2*i, 2*j+1) += Weight_y*from_arr(i,j+1);
+			}
+			else if(Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + 2*j*to_input.dy - Gamma_y);
+				to_input(2*i, 2*j+1) += Weight_y*from_arr(i,j);
+			}
+
+			// Out of the interface node
+			to_input(2*i+1,2*j) += (T)1/2*(from_arr(i,j) + from_arr(i+1,j));
+			to_input(2*i+2,2*j+1) += (T)1/2*(from_arr(i+1,j+1) + from_arr(i+1,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i,j));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				to_input(2*i+1,2*j+1) += (T)1/4*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i, 2*j+1));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2 ))*(to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i+1,j+1));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1)+to_input(2*i+2,2*j+1));
+			}
+		}
+
+		// 4th Region
+		else if(larr(i,j) > 0 && larr(i+1,j) > 0 && larr(i,j+1) > 0 && larr(i+1,j+1) <= 0)
+		{
+			// Around the interface node
+			T Gamma_x = x_min + i*dx + abs(larr(i,j+1))/(abs(larr(i,j+1))+abs(larr(i+1,j+1)));
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j+2) += Weight_x*from_arr(i+1,j+1);
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + 2*i*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j+2) += Weight_x*from_arr(i,j+1);
+			}
+
+			T Gamma_y = y_min + j*dy + abs(larr(i+1,j))/(abs(larr(i+1,j))+abs(larr(i+1,j+1)));
+			if(Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y);
+				to_input(2*i+2, 2*j+1) += Weight_y*from_arr(i+1,j+1);
+			}
+			else if(Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + 2*j*to_input.dy - Gamma_y);
+				to_input(2*i+2, 2*j+1) += Weight_y*from_arr(i+1,j);
+			}
+
+			// Out of the interface node
+			to_input(2*i+1,2*j) += (T)1/2*(from_arr(i,j) + from_arr(i+1,j));
+			to_input(2*i,2*j+1) += (T)1/2*(from_arr(i,j+1) + from_arr(i,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i+1,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2 ))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i,j+1));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i+1,j));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				to_input(2*i+1,2*j+1) += (T)1/4*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i, 2*j+1));
+			}
+		}
+
+		// 5th Region
+		else if(larr(i,j) <= 0 && larr(i+1,j) > 0 && larr(i,j+1) <= 0 && larr(i+1,j+1) > 0)
+		{
+			// Around the interface node
+			T Gamma_x_1 = x_min + i*dx + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i+1,j)));
+			if(Gamma_x_1 <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x_1 = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_1)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x_1);
+				to_input(2*i+1,2*j) += Weight_x_1*from_arr(i+1,j);
+			}
+			else if(Gamma_x_1 > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x_1 = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_1)/(to_input.x_min + 2*i*to_input.dx - Gamma_x_1);
+				to_input(2*i+1,2*j) += Weight_x_1*from_arr(i,j);
+			}
+
+			T Gamma_x_2 = x_min + i*dx + abs(larr(i,j+1))/(abs(larr(i,j+1))+abs(larr(i+1,j+1)));
+			if(Gamma_x_2 <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x_2 = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_2)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x_2);
+				to_input(2*i+1, 2*j+2) += Weight_x_2*from_arr(i+1,j+1);
+			}
+			else if(Gamma_x_2 > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x_2 = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_2)/(to_input.x_min + 2*i*to_input.dx - Gamma_x_2);
+				to_input(2*i+1, 2*j+2) += Weight_x_2*from_arr(i+1,j);
+			}
+
+			// Out of the interface node
+			to_input(2*i,2*j+1) += (T)1/2*(from_arr(i,j) + from_arr(i,j+1));
+			to_input(2*i+2,2*j+1) += (T)1/2*(from_arr(i+1,j+1) + from_arr(i+1,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x_1 <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_x_2 <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T theta = abs(to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_1);
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j+2)+to_input(2*i+1,2*j)+to_input(2*i,2*j+1));
+			}
+			else if(Gamma_x_1 <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_x_2 > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T theta_1 = abs(larr(i,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j+2)+to_input(2*i,2*j+1));
+			}
+			else if(Gamma_x_1 > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_x_2 <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T theta_1 = abs(larr(i,j+1));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1));
+			}
+			else if(Gamma_x_1 > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_x_2 > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T theta = abs(larr(i+1,j+1));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j+2)+to_input(2*i+1,2*j)+to_input(2*i,2*j+1));
+			}
+		}
+
+		// 6th Region
+		else if(larr(i,j) > 0 && larr(i+1,j) <= 0 && larr(i,j+1) > 0 && larr(i+1,j+1) <= 0)
+		{
+			// Around the interface node
+			T Gamma_x_1 = x_min + i*dx + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i+1,j)));
+			if(Gamma_x_1 <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x_1 = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_1)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x_1);
+				to_input(2*i+1,2*j) += Weight_x_1*from_arr(i+1,j);
+			}
+			else if(Gamma_x_1 > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x_1 = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_1)/(to_input.x_min + 2*i*to_input.dx - Gamma_x_1);
+				to_input(2*i+1,2*j) += Weight_x_1*from_arr(i,j);
+			}
+					
+			T Gamma_x_2 = x_min + i*dx + abs(larr(i,j+1))/(abs(larr(i,j+1))+abs(larr(i+1,j+1)));
+			if(Gamma_x_2 <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x_2 = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_2)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x_2);
+				to_input(2*i+1, 2*j+2) += Weight_x_2*from_arr(i+1,j+1);
+			}
+			else if(Gamma_x_2 > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x_2 = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_2)/(to_input.x_min + 2*i*to_input.dx - Gamma_x_2);
+				to_input(2*i+1, 2*j+2) += Weight_x_2*from_arr(i,j+1);
+			}
+					
+			// Out of the interface node
+			to_input(2*i,2*j+1) += (T)1/2*(from_arr(i,j) + from_arr(i,j+1));
+			to_input(2*i+2,2*j+1) += (T)1/2*(from_arr(i+1,j+1) + from_arr(i+1,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x_1 <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_x_2 <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T theta = abs(to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_1);
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j+2)+to_input(2*i+1,2*j)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x_1 <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_x_2 > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T theta_1 = abs(larr(i,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x_1 > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_x_2 <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T theta_1 = abs(larr(i,j+1));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x_1 > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_x_2 > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T theta = abs(to_input.x_min + (2*i+1)*to_input.dx - Gamma_x_1);
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j+2)+to_input(2*i+1,2*j)+to_input(2*i,2*j+1));
+			}
+		}
+
+		// 7th Region
+		else if(larr(i,j) > 0 && larr(i+1,j) > 0 && larr(i,j+1) <= 0 && larr(i+1,j+1) <= 0)
+		{
+			// Around the interface node
+			T Gamma_y_1 = y_min + j*dy + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i,j+1)));
+			if(Gamma_y_1 <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y_1 = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y_1)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y_1);
+				to_input(2*i,2*j+1) += Weight_y_1*from_arr(i,j+1);
+			}
+			else if(Gamma_y_1 > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y_1 = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y_1)/(to_input.y_min + 2*j*to_input.dy - Gamma_y_1);
+				to_input(2*i,2*j+1) += Weight_y_1*from_arr(i,j);
+			}
+
+			T Gamma_y_2 = y_min + j*dy + abs(larr(i+1,j))/(abs(larr(i+1,j))+abs(larr(i+1,j+1)));
+			if(Gamma_y_2 <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y_2 = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y_2)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y_2);
+				to_input(2*i+2, 2*j+1) += Weight_y_2*from_arr(i+1,j+1);
+			}
+			else if(Gamma_y_2 > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y_2 = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y_2)/(to_input.y_min + 2*j*to_input.dy - Gamma_y_2);
+				to_input(2*i+2, 2*j+1) += Weight_y_2*from_arr(i+1,j);
+			}
+					
+			// Out of the interface node
+			to_input(2*i+1,2*j) += (T)1/2*(from_arr(i,j) + from_arr(i+1,j));
+			to_input(2*i+1,2*j+2) += (T)1/2*(from_arr(i,j+1) + from_arr(i+1,j+1));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_y_1 <= (to_input.y_min + (2*j+1)*to_input.dy) && Gamma_y_2 <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(to_input.y_min + (2*j+1)*to_input.dx - Gamma_y_1);
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dy*to_input.dy/theta2))*(to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j+2)+to_input(2*i,2*j+1));
+			}
+			else if(Gamma_y_1 <= (to_input.y_min + (2*j+1)*to_input.dy) && Gamma_y_2 > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j+2)+to_input(2*i,2*j+1));
+			}
+			else if(Gamma_y_1 > (to_input.y_min + (2*j+1)*to_input.dy) && Gamma_y_2 <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j+1));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_y_1 > (to_input.y_min + (2*j+1)*to_input.dy) && Gamma_y_2 > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(to_input.y_min + (2*j+1)*to_input.dx - Gamma_y_1);
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dy*to_input.dy/theta2))*(to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i,2*j+1));
+			}
+		}
+
+		// 8th Region
+		else if(larr(i,j) <= 0 && larr(i+1,j) <= 0 && larr(i,j+1) > 0 && larr(i+1,j+1) > 0)
+		{
+			// Around the interface node
+			T Gamma_y_1 = y_min + j*dy + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i,j+1)));
+			if(Gamma_y_1 <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y_1 = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y_1)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y_1);
+				to_input(2*i,2*j+1) += Weight_y_1*from_arr(i,j+1);
+			}
+			else if(Gamma_y_1 > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y_1 = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y_1)/(to_input.y_min + 2*j*to_input.dy - Gamma_y_1);
+				to_input(2*i,2*j+1) += Weight_y_1*from_arr(i,j);
+			}
+					
+			T Gamma_y_2 = y_min + j*dy + abs(larr(i+1,j))/(abs(larr(i+1,j))+abs(larr(i+1,j+1)));
+			if(Gamma_y_2 <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y_2 = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y_2)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y_2);
+				to_input(2*i+2, 2*j+1) += Weight_y_2*from_arr(i+1,j+1);
+			}
+			else if(Gamma_y_2 > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y_2 = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y_2)/(to_input.y_min + 2*j*to_input.dy - Gamma_y_2);
+				to_input(2*i+2, 2*j+1) += Weight_y_2*from_arr(i+1,j);
+			}
+					
+			// Out of the interface node
+			to_input(2*i+1,2*j) += (T)1/2*(from_arr(i,j) + from_arr(i+1,j));
+			to_input(2*i+1,2*j+2) += (T)1/2*(from_arr(i,j+1) + from_arr(i+1,j+1));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_y_1 <= (to_input.y_min + (2*j+1)*to_input.dy) && Gamma_y_2 <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(to_input.y_min + (2*j+1)*to_input.dx - Gamma_y_1);
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dy*to_input.dy/theta2))*(to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j+2)+to_input(2*i,2*j+1));
+			}
+			else if(Gamma_y_1 <= (to_input.y_min + (2*j+1)*to_input.dy) && Gamma_y_2 > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_y_1 > (to_input.y_min + (2*j+1)*to_input.dy) && Gamma_y_2 <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j+1));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1));
+			}
+			else if(Gamma_y_1 > (to_input.y_min + (2*j+1)*to_input.dy) && Gamma_y_2 > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(to_input.y_min + (2*j+1)*to_input.dx - Gamma_y_1);
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dy*to_input.dy/theta2))*(to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i,2*j+1));
+			}
+		}
+			
+		// 9th Region
+		else if(larr(i,j) <= 0 && larr(i+1,j) > 0 && larr(i,j+1) <= 0 && larr(i+1,j+1) <= 0)
+		{
+			// Around the interface node
+			T Gamma_x = x_min + i*dx + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i+1,j)));
+			if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + 2*i*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j) += Weight_x*from_arr(i,j);
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j) += Weight_x*from_arr(i+1,j);
+			}
+					
+			T Gamma_y = y_min + j*dy + abs(larr(i+1,j))/(abs(larr(i+1,j))+abs(larr(i+1,j+1)));
+			if(Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y);
+				to_input(2*i+2, 2*j+1) += Weight_y*from_arr(i+1,j+1);
+			}
+			else if(Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + 2*j*to_input.dy - Gamma_y);
+				to_input(2*i+2, 2*j+1) += Weight_y*from_arr(i+1,j);
+			}
+					
+			// Out of the interface node
+			to_input(2*i+1,2*j+2) += (T)1/2*(from_arr(i,j+1) + from_arr(i+1,j+1));
+			to_input(2*i,2*j+1) += (T)1/2*(from_arr(i,j+1) + from_arr(i,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i,j));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2 ))*(to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				to_input(2*i+1,2*j+1) += (T)1/4*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i, 2*j+1));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i+1,j+1));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2)+to_input(2*i+1,2*j));
+			}
+		}
+
+		// 10th Region
+		else if(larr(i,j) <= 0 && larr(i+1,j) <= 0 && larr(i,j+1) > 0 && larr(i+1,j+1) <= 0)
+		{
+			// Around the interface node
+			T Gamma_x = x_min + i*dx + abs(larr(i,j+1))/(abs(larr(i,j+1))+abs(larr(i+1,j+1)));
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j+2) += Weight_x*from_arr(i+1,j+1);
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + 2*i*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j+2) += Weight_x*from_arr(i,j+1);
+			}
+
+			T Gamma_y = y_min + j*dy + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i,j+1)));
+			if(Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y);
+				to_input(2*i, 2*j+1) += Weight_y*from_arr(i,j+1);
+			}
+			else if(Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + 2*j*to_input.dy - Gamma_y);
+				to_input(2*i, 2*j+1) += Weight_y*from_arr(i,j);
+			}
+
+			// Out of the interface node
+			to_input(2*i+1,2*j) += (T)1/2*(from_arr(i,j) + from_arr(i+1,j));
+			to_input(2*i+2,2*j+1) += (T)1/2*(from_arr(i+1,j+1) + from_arr(i+1,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i,j));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				to_input(2*i+1,2*j+1) += (T)1/4*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i, 2*j+1));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2 ))*(to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i+1,j+1));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1)+to_input(2*i+2,2*j+1));
+			}
+		}
+
+		// 11th Region
+		else if(larr(i,j) <= 0 && larr(i+1,j) <= 0 && larr(i,j+1) <= 0 && larr(i+1,j+1) > 0)
+		{
+			// Around the interface node
+			T Gamma_x = x_min + i*dx + abs(larr(i,j+1))/(abs(larr(i,j+1))+abs(larr(i+1,j+1)));
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j+2) += Weight_x*from_arr(i+1,j+1);
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + 2*i*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j+2) += Weight_x*from_arr(i,j+1);
+			}
+
+			T Gamma_y = y_min + j*dy + abs(larr(i+1,j))/(abs(larr(i+1,j))+abs(larr(i+1,j+1)));
+			if(Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y);
+				to_input(2*i+2, 2*j+1) += Weight_y*from_arr(i+1,j+1);
+			}
+			else if(Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + 2*j*to_input.dy - Gamma_y);
+				to_input(2*i+2, 2*j+1) += Weight_y*from_arr(i+1,j);
+			}
+
+			// Out of the interface node
+			to_input(2*i+1,2*j) += (T)1/2*(from_arr(i,j) + from_arr(i+1,j));
+			to_input(2*i,2*j+1) += (T)1/2*(from_arr(i,j+1) + from_arr(i,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i+1,j));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i,j+1));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2 ))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i,j+1));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i+1,j));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2));
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				to_input(2*i+1,2*j+1) += (T)1/4*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i, 2*j+1));
+			}
+		}
+
+		// 12th Region
+		else if(larr(i,j) > 0 && larr(i+1,j) <= 0 && larr(i,j+1) <= 0 && larr(i+1,j+1) <= 0)
+		{
+			// Around the interface node
+			T Gamma_x = x_min + i*dx + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i+1,j)));
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + (2*i+2)*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j) += Weight_x*from_arr(i+1,j);
+			}
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx))
+			{
+				T Weight_x = (to_input.x_min + (2*i+1)*to_input.dx - Gamma_x)/(to_input.x_min + 2*i*to_input.dx - Gamma_x);
+				to_input(2*i+1,2*j) += Weight_x*from_arr(i,j);
+			}
+
+			T Gamma_y = y_min + j*dy + abs(larr(i,j))/(abs(larr(i,j))+abs(larr(i,j+1)));
+			if(Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + (2*j+2)*to_input.dy - Gamma_y);
+				to_input(2*i, 2*j+1) += Weight_y*from_arr(i,j+1);
+			}
+			else if(Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T Weight_y = (to_input.y_min + (2*j+1)*to_input.dy - Gamma_y)/(to_input.y_min + 2*j*to_input.dy - Gamma_y);
+				to_input(2*i, 2*j+1) += Weight_y*from_arr(i,j);
+			}
+					
+			// Out of the interface node
+			to_input(2*i+1,2*j+2) += (T)1/2*(from_arr(i,j+1) + from_arr(i+1,j+1));
+			to_input(2*i+2,2*j+1) += (T)1/2*(from_arr(i+1,j+1) + from_arr(i+1,j));
+
+			// Center node (Use the 5-stencil)
+			if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+					to_input(2*i+1,2*j+1) += (T)1/4*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1)+to_input(2*i+1,2*j)+to_input(2*i, 2*j+1));
+			else if(Gamma_x > (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i+1,j));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i,2*j+1)+to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y > (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta = abs(larr(i,j+1));
+				T theta2 = theta*theta;
+				to_input(2*i+1,2*j+1) += ((T)1/(3+to_input.dx*to_input.dx/theta2))*(to_input(2*i+1,2*j)+to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+			else if(Gamma_x <= (to_input.x_min + (2*i+1)*to_input.dx) && Gamma_y <= (to_input.y_min + (2*j+1)*to_input.dy))
+			{
+				T theta_1 = abs(larr(i,j+1));
+				T theta_1_2 = theta_1*theta_1;
+				T theta_2 = abs(larr(i+1,j));
+				T theta_2_2 = theta_2*theta_2;
+				to_input(2*i+1,2*j+1) += ((T)1/(2+to_input.dx*to_input.dx/theta_1_2+to_input.dx*to_input.dx/theta_2_2))*(to_input(2*i+1,2*j+2)+to_input(2*i+2,2*j+1));
+			}
+		}
+		// 13th Region
+		else if(larr(i,j) <= 0 && larr(i+1,j) <= 0 && larr(i,j+1) <= 0 && larr(i+1,j+1) <= 0)
+		{
+			to_input(2*i+1,2*j) += (T)1/2*(from_arr(i,j) + from_arr(i+1,j));
+			to_input(2*i,2*j+1) += (T)1/2*(from_arr(i,j) + from_arr(i,j+1));
+			to_input(2*i+1,2*j+2) += (T)1/2*(from_arr(i,j+1) + from_arr(i+1,j+1));
+			to_input(2*i+2,2*j+1) += (T)1/2*(from_arr(i+1,j) + from_arr(i+1,j+1));
+			to_input(2*i+1,2*j+1) += (T)1/4*(from_arr(i,j)+from_arr(i+1,j)+from_arr(i,j+1)+from_arr(i+1,j+1));
+		}
+		// 14th Region
+		else if(larr(i,j) > 0 && larr(i+1,j) > 0 && larr(i,j+1) > 0 && larr(i+1,j+1) > 0)
+		{
+			to_input(2*i+1,2*j) += (T)1/2*(from_arr(i,j) + from_arr(i+1,j));
+			to_input(2*i,2*j+1) += (T)1/2*(from_arr(i,j) + from_arr(i,j+1));
+			to_input(2*i+1,2*j+2) += (T)1/2*(from_arr(i,j+1) + from_arr(i+1,j+1));
+			to_input(2*i+2,2*j+1) += (T)1/2*(from_arr(i+1,j) + from_arr(i+1,j+1));
+			to_input(2*i+1,2*j+1) += (T)1/4*(from_arr(i,j)+from_arr(i+1,j)+from_arr(i,j+1)+from_arr(i+1,j+1));
+		}
+		// For debug
+		else
+		{
+			cout << "You miss at least one region!:(" << endl;
+			cout << "Try to fix AdditiveSampling in FIELD_STRUCTURE_2D.h!" << endl;
+			cout << larr(i, j) << endl;
+		}
+	}
+	END_GRID_ITERATION_2D;
+}
 
 
 

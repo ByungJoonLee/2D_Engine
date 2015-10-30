@@ -1067,6 +1067,30 @@ public: // Error Estimate Functions (For the Test)
 	}
 };
 
+// For Multigrid
+//void Sampling(MULTITHREADING* multithreading, const LEVELSET_2D& from_input, LEVELSET_2D& to_input, const int& thread_id)
+//{
+//	ARRAY_2D<T> &to_arr(to_input.signed_distance_field.array_for_this);
+//
+//	BEGIN_GRID_ITERATION_2D(to_input.signed_distance_field.partial_grids_ghost[thread_id])
+//	{
+//		to_arr(i, j) = from_input.BiLinearInterpolation(to_input.CellCenter(i, j));
+//	}
+//	END_GRID_ITERATION_2D;
+//}
+//
+//void DownSampling(MULTITHREADING* multithreading, const LEVELSET_2D& from_input, LEVELSET_2D& to_input, const int& thread_id)
+//{
+//	const ARRAY_2D<T> &from_arr(from_input.signed_distance_field.array_for_this);
+//	ARRAY_2D<T> &to_arr(to_input.signed_distance_field.array_for_this);
+//
+//	BEGIN_GRID_ITERATION_2D(to_input.partial_grids[thread_id])
+//	{
+//		to_arr(i, j) = (from_arr(i*2,  j*2) + from_arr(i*2,  j*2 + 1) + from_arr(i*2 + 1,  j*2) + from_arr(i*2 + 1,  j*2 + 1))/(T)4;
+//	}
+//	END_GRID_ITERATION_2D;
+//}
+
 template<class TT>
 static void ComputeCurvature(const FIELD_STRUCTURE_2D<TT>& levelset_phi, FIELD_STRUCTURE_2D<TT>& curvature)
 {
